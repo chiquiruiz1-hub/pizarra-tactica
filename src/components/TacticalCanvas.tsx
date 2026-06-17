@@ -1140,77 +1140,79 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
     });
 
     // 5. Draw Players (only if they are NOT docked!)
-    players.forEach(pl => {
-      if (pl.docked) return; // Hide docked players from the canvas
+    if (isPresentationMode) {
+      players.forEach(pl => {
+        if (pl.docked) return; // Hide docked players from the canvas
 
-      const isSelected = draggingItem?.type === 'player' && draggingItem?.id === pl.id;
-      const isHighlighted = selectedPlayerId === pl.id;
+        const isSelected = draggingItem?.type === 'player' && draggingItem?.id === pl.id;
+        const isHighlighted = selectedPlayerId === pl.id;
 
-      if (isSelected || isHighlighted) {
-        ctx.beginPath();
-        ctx.arc(pl.x, pl.y, PLAYER_RADIUS + 5, 0, 2 * Math.PI);
-        ctx.fillStyle = isHighlighted ? 'rgba(16, 185, 129, 0.35)' : 'rgba(255, 255, 255, 0.3)';
-        ctx.fill();
-      }
-
-      ctx.beginPath();
-      ctx.arc(pl.x, pl.y, PLAYER_RADIUS, 0, 2 * Math.PI);
-
-      if (pl.id === 'referee') {
-        // Special Referee look
-        ctx.fillStyle = '#10b981'; // bright green
-        ctx.fill();
-        ctx.strokeStyle = '#000000';
-        ctx.lineWidth = 3;
-        ctx.stroke();
-        ctx.fillStyle = '#000000';
-        ctx.font = 'bold 12px Inter, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('ÁRB', pl.x, pl.y);
-      } else if (pl.isGK) {
-        ctx.fillStyle = '#fbbf24';
-        ctx.fill();
-        ctx.strokeStyle = '#1e2937';
-        ctx.lineWidth = 3;
-        ctx.stroke();
-        ctx.fillStyle = '#1e2937';
-        ctx.font = 'bold 16px Inter, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(pl.number.toString(), pl.x, pl.y);
-      } else {
-        if (pl.colorTag) {
-          ctx.fillStyle =
-            pl.colorTag === 'blue'
-              ? '#2563eb'
-              : pl.colorTag === 'red'
-              ? '#dc2626'
-              : pl.colorTag === 'yellow'
-              ? '#fbbf24'
-              : pl.colorTag === 'green'
-              ? '#10b981'
-              : pl.colorTag === 'orange'
-              ? '#f97316'
-              : pl.colorTag === 'purple'
-              ? '#8b5cf6'
-              : pl.colorTag === 'white'
-              ? '#ffffff'
-              : '#000000';
-        } else {
-          ctx.fillStyle = pl.team === 'home' ? '#2563eb' : '#dc2626';
+        if (isSelected || isHighlighted) {
+          ctx.beginPath();
+          ctx.arc(pl.x, pl.y, PLAYER_RADIUS + 5, 0, 2 * Math.PI);
+          ctx.fillStyle = isHighlighted ? 'rgba(16, 185, 129, 0.35)' : 'rgba(255, 255, 255, 0.3)';
+          ctx.fill();
         }
-        ctx.fill();
-        ctx.strokeStyle = pl.colorTag === 'white' ? '#1e2937' : '#ffffff';
-        ctx.lineWidth = 3;
-        ctx.stroke();
-        ctx.fillStyle = pl.colorTag === 'white' ? '#1e2937' : '#ffffff';
-        ctx.font = 'bold 16px Inter, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(pl.number.toString(), pl.x, pl.y);
-      }
-    });
+
+        ctx.beginPath();
+        ctx.arc(pl.x, pl.y, PLAYER_RADIUS, 0, 2 * Math.PI);
+
+        if (pl.id === 'referee') {
+          // Special Referee look
+          ctx.fillStyle = '#10b981'; // bright green
+          ctx.fill();
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = 3;
+          ctx.stroke();
+          ctx.fillStyle = '#000000';
+          ctx.font = 'bold 12px Inter, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('ÁRB', pl.x, pl.y);
+        } else if (pl.isGK) {
+          ctx.fillStyle = '#fbbf24';
+          ctx.fill();
+          ctx.strokeStyle = '#1e2937';
+          ctx.lineWidth = 3;
+          ctx.stroke();
+          ctx.fillStyle = '#1e2937';
+          ctx.font = 'bold 16px Inter, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(pl.number.toString(), pl.x, pl.y);
+        } else {
+          if (pl.colorTag) {
+            ctx.fillStyle =
+              pl.colorTag === 'blue'
+                ? '#2563eb'
+                : pl.colorTag === 'red'
+                ? '#dc2626'
+                : pl.colorTag === 'yellow'
+                ? '#fbbf24'
+                : pl.colorTag === 'green'
+                ? '#10b981'
+                : pl.colorTag === 'orange'
+                ? '#f97316'
+                : pl.colorTag === 'purple'
+                ? '#8b5cf6'
+                : pl.colorTag === 'white'
+                ? '#ffffff'
+                : '#000000';
+          } else {
+            ctx.fillStyle = pl.team === 'home' ? '#2563eb' : '#dc2626';
+          }
+          ctx.fill();
+          ctx.strokeStyle = pl.colorTag === 'white' ? '#1e2937' : '#ffffff';
+          ctx.lineWidth = 3;
+          ctx.stroke();
+          ctx.fillStyle = pl.colorTag === 'white' ? '#1e2937' : '#ffffff';
+          ctx.font = 'bold 16px Inter, sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(pl.number.toString(), pl.x, pl.y);
+        }
+      });
+    }
 
     // 6. Draw Ball
     const isBallSelected = draggingItem?.type === 'ball';
@@ -1281,7 +1283,7 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
   }, [drawAll]);
 
   // Pointer event listeners
-  const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
+  const handlePointerDown = (e: React.PointerEvent<any>) => {
     const canvas = canvasRef.current;
     if (!canvas || isPlaying) return;
 
@@ -1366,7 +1368,7 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
     }
   };
 
-  const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+  const handlePointerMove = (e: React.PointerEvent<any>) => {
     const canvas = canvasRef.current;
     if (!canvas || isPlaying) return;
 
@@ -1440,7 +1442,7 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
     }
   };
 
-  const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+  const handlePointerUp = (e: React.PointerEvent<any>) => {
     const canvas = canvasRef.current;
     if (canvas) {
       canvas.releasePointerCapture(e.pointerId);
@@ -1460,7 +1462,7 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
   };
 
   // Zoom wheel inside presentation mode
-  const handleWheelZoom = (e: React.WheelEvent<HTMLCanvasElement>) => {
+  const handleWheelZoom = (e: React.WheelEvent<any>) => {
     if (!isPresentationMode) return;
     e.preventDefault();
 
@@ -2022,19 +2024,135 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
 
           {/* Main canvas container */}
           <div className="canvas-wrapper pres-fullscreen-stage glassmorphic w-full" style={{ overflow: 'hidden', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-            <canvas
-              ref={canvasRef}
-              width={PITCH_WIDTH}
-              height={PITCH_HEIGHT}
+            <div
+              style={{
+                position: 'relative',
+                maxWidth: '100%',
+                width: `${PITCH_WIDTH}px`,
+                aspectRatio: `${PITCH_WIDTH} / ${PITCH_HEIGHT}`
+              }}
               onPointerDown={handlePointerDown}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
               onWheel={handleWheelZoom}
-              onDragOver={handleCanvasDragOver}
-              onDrop={handleCanvasDrop}
-              className="pitch-canvas"
-              style={{ maxWidth: '100%', height: 'auto', display: 'block', objectFit: 'contain' }}
-            />
+            >
+              <canvas
+                ref={canvasRef}
+                width={PITCH_WIDTH}
+                height={PITCH_HEIGHT}
+                onDragOver={handleCanvasDragOver}
+                onDrop={handleCanvasDrop}
+                className="pitch-canvas"
+                style={{ width: '100%', height: '100%', display: 'block', objectFit: 'contain' }}
+              />
+
+              {/* HTML Player Tokens Overlay */}
+              {!isPresentationMode && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    pointerEvents: 'none'
+                  }}
+                >
+                  {players.filter(pl => !pl.docked).map(pl => {
+                    const isGK = pl.isGK;
+                    const isReferee = pl.id === 'referee';
+                    const bgColor = isReferee
+                      ? '#10b981'
+                      : isGK
+                      ? '#fbbf24'
+                      : pl.colorTag
+                      ? pl.colorTag === 'blue' ? '#2563eb' : pl.colorTag === 'red' ? '#dc2626' : pl.colorTag === 'yellow' ? '#fbbf24' : pl.colorTag === 'green' ? '#10b981' : pl.colorTag === 'orange' ? '#f97316' : pl.colorTag === 'purple' ? '#8b5cf6' : pl.colorTag === 'white' ? '#ffffff' : '#000000'
+                      : pl.team === 'home' ? '#2563eb' : '#dc2626';
+                    
+                    const textColor = isReferee || isGK || pl.colorTag === 'white' ? '#1e2937' : '#ffffff';
+                    const borderColor = pl.colorTag === 'white' ? '#1e2937' : '#ffffff';
+
+                    const isSelected = draggingItem?.type === 'player' && draggingItem?.id === pl.id;
+                    const isHighlighted = selectedPlayerId === pl.id;
+
+                    return (
+                      <div
+                        key={pl.id}
+                        className="group"
+                        style={{
+                          position: 'absolute',
+                          left: `${(pl.x / PITCH_WIDTH) * 100}%`,
+                          top: `${(pl.y / PITCH_HEIGHT) * 100}%`,
+                          width: `${(PLAYER_RADIUS * 2 / PITCH_WIDTH) * 100}%`,
+                          aspectRatio: '1',
+                          transform: 'translate(-50%, -50%)',
+                          zIndex: 30,
+                          cursor: 'grab',
+                          boxShadow: isHighlighted
+                            ? '0 0 0 6px rgba(16, 185, 129, 0.35)'
+                            : isSelected
+                            ? '0 0 0 6px rgba(255, 255, 255, 0.3)'
+                            : 'none',
+                          borderRadius: '50%',
+                          pointerEvents: 'auto'
+                        }}
+                      >
+                        {/* Token Circle */}
+                        <div
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            borderRadius: '50%',
+                            backgroundColor: bgColor,
+                            border: `2px solid ${borderColor}`,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            color: textColor,
+                            fontWeight: 'bold',
+                            fontSize: isReferee ? '10px' : '14px',
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.35)'
+                          }}
+                        >
+                          {isReferee ? 'ÁRB' : pl.number}
+                        </div>
+
+                        {/* Close button "x" */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            e.preventDefault();
+                            setPlayers(prev => prev.map(p => p.id === pl.id ? { ...p, x: 0, y: 0, docked: true } : p));
+                            setSelectedPlayerId(null);
+                          }}
+                          onPointerDown={(e) => {
+                            e.stopPropagation();
+                          }}
+                          className="absolute -top-1 -right-1 hidden group-hover:block"
+                          style={{
+                            width: '18px',
+                            height: '18px',
+                            borderRadius: '50%',
+                            backgroundColor: '#ef4444',
+                            color: '#ffffff',
+                            border: '1px solid #ffffff',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '12px',
+                            lineHeight: 1,
+                            cursor: 'pointer',
+                            zIndex: 40
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
