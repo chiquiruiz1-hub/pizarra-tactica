@@ -1846,19 +1846,40 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
         
         {/* LEFT DOCK: HOME TEAM */}
         {!isPresentationMode && (
-          <aside className="dock-sidebar glassmorphic home-dock">
-            <h4 className="dock-title text-blue">Fichas Local</h4>
-            <div className="dock-list scrollbar-custom">
-              {localHomePlayers.map(p => (
+          <aside className="dock-sidebar glassmorphic home-dock" style={{ width: '80px', minWidth: '80px', maxWidth: '80px', padding: '0.75rem 0.25rem', display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+            <h4 className="dock-title text-blue" style={{ fontSize: '0.65rem', textAlign: 'center', width: '100%', wordBreak: 'break-word', marginBottom: '0.5rem', paddingBottom: '0.25rem' }}>Fichas Local</h4>
+            <div className="dock-list scrollbar-custom" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', width: '100%', overflowY: 'auto' }}>
+              {localHomePlayers.filter(p => p.docked).map(p => (
                 <div
                   key={p.id}
                   draggable={p.docked}
                   onDragStart={e => handleDockDragStart(e, p.id)}
-                  className={`dock-item-card ${!p.docked ? 'deployed-opacity' : ''}`}
+                  className="dock-item-card"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    cursor: 'grab',
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    width: '36px',
+                    height: '36px',
+                    flexShrink: 0
+                  }}
                 >
                   <div
                     className="dock-item-token"
                     style={{
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '50%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '0.9rem',
+                      fontWeight: 700,
+                      border: '2px solid #ffffff',
                       backgroundColor: p.isGK
                         ? '#fbbf24'
                         : p.colorTag
@@ -1870,42 +1891,45 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
                   >
                     {p.number}
                   </div>
-                  <div className="dock-item-details">
-                    {editingPlayerId === p.id ? (
-                      <input
-                        type="text"
-                        value={editingName}
-                        onChange={e => setEditingName(e.target.value)}
-                        onBlur={savePlayerName}
-                        onKeyDown={e => { if (e.key === 'Enter') savePlayerName(); }}
-                        autoFocus
-                        className="dock-name-input"
-                      />
-                    ) : (
-                      <span onDoubleClick={e => startEditPlayerName(p.id, p.name, e)} className="dock-item-name" title="Doble clic para renombrar">
-                        {p.name}
-                      </span>
-                    )}
-                    <span className="dock-item-status text-muted">
-                      {p.docked ? 'En Banquillo' : 'En Campo'}
-                    </span>
-                  </div>
                 </div>
               ))}
 
               {/* Referee Entity at bottom of Home dock */}
-              {refereePlayer && (
+              {refereePlayer && refereePlayer.docked && (
                 <div
                   draggable={refereePlayer.docked}
                   onDragStart={e => handleDockDragStart(e, refereePlayer.id)}
-                  className={`dock-item-card referee-card ${!refereePlayer.docked ? 'deployed-opacity' : ''}`}
+                  className="dock-item-card referee-card"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    cursor: 'grab',
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    width: '36px',
+                    height: '36px',
+                    flexShrink: 0
+                  }}
                 >
-                  <div className="dock-item-token" style={{ backgroundColor: '#10b981', color: '#000000', borderColor: '#000000' }}>
+                  <div
+                    className="dock-item-token"
+                    style={{
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '50%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '0.65rem',
+                      fontWeight: 700,
+                      border: '2px solid #000000',
+                      backgroundColor: '#10b981',
+                      color: '#000000'
+                    }}
+                  >
                     ÁRB
-                  </div>
-                  <div className="dock-item-details">
-                    <span className="dock-item-name font-semibold">{refereePlayer.name}</span>
-                    <span className="dock-item-status text-muted">{refereePlayer.docked ? 'En Banquillo' : 'En Campo'}</span>
                   </div>
                 </div>
               )}
@@ -1914,7 +1938,7 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
         )}
 
         {/* CENTER COLUMN: CANVAS FIELD & TIMERS */}
-        <div className="canvas-viewport-column flex-col items-center">
+        <div className="canvas-viewport-column flex-col items-center" style={{ flex: 1, minWidth: 0 }}>
           
           {/* TIMER HUD OVERLAY */}
           {mode === 'entrenamiento' && !isPresentationMode && (
@@ -1997,7 +2021,7 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
           )}
 
           {/* Main canvas container */}
-          <div className="canvas-wrapper pres-fullscreen-stage glassmorphic w-full">
+          <div className="canvas-wrapper pres-fullscreen-stage glassmorphic w-full" style={{ overflow: 'hidden', display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
             <canvas
               ref={canvasRef}
               width={PITCH_WIDTH}
@@ -2009,25 +2033,47 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
               onDragOver={handleCanvasDragOver}
               onDrop={handleCanvasDrop}
               className="pitch-canvas"
+              style={{ maxWidth: '100%', height: 'auto', display: 'block', objectFit: 'contain' }}
             />
           </div>
         </div>
 
         {/* RIGHT DOCK: AWAY TEAM */}
         {!isPresentationMode && (
-          <aside className="dock-sidebar glassmorphic away-dock">
-            <h4 className="dock-title text-red">Fichas Visitante</h4>
-            <div className="dock-list scrollbar-custom">
-              {localAwayPlayers.map(p => (
+          <aside className="dock-sidebar glassmorphic away-dock" style={{ width: '80px', minWidth: '80px', maxWidth: '80px', padding: '0.75rem 0.25rem', display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
+            <h4 className="dock-title text-red" style={{ fontSize: '0.65rem', textAlign: 'center', width: '100%', wordBreak: 'break-word', marginBottom: '0.5rem', paddingBottom: '0.25rem' }}>Fichas Visitante</h4>
+            <div className="dock-list scrollbar-custom" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', width: '100%', overflowY: 'auto' }}>
+              {localAwayPlayers.filter(p => p.docked).map(p => (
                 <div
                   key={p.id}
                   draggable={p.docked}
                   onDragStart={e => handleDockDragStart(e, p.id)}
-                  className={`dock-item-card ${!p.docked ? 'deployed-opacity' : ''}`}
+                  className="dock-item-card"
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    cursor: 'grab',
+                    display: 'flex',
+                    justifyContent: 'center',
+                    alignItems: 'center',
+                    width: '36px',
+                    height: '36px',
+                    flexShrink: 0
+                  }}
                 >
                   <div
                     className="dock-item-token"
                     style={{
+                      width: '36px',
+                      height: '36px',
+                      borderRadius: '50%',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '0.9rem',
+                      fontWeight: 700,
+                      border: '2px solid #ffffff',
                       backgroundColor: p.isGK
                         ? '#fbbf24'
                         : p.colorTag
@@ -2038,26 +2084,6 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
                     }}
                   >
                     {p.number}
-                  </div>
-                  <div className="dock-item-details">
-                    {editingPlayerId === p.id ? (
-                      <input
-                        type="text"
-                        value={editingName}
-                        onChange={e => setEditingName(e.target.value)}
-                        onBlur={savePlayerName}
-                        onKeyDown={e => { if (e.key === 'Enter') savePlayerName(); }}
-                        autoFocus
-                        className="dock-name-input"
-                      />
-                    ) : (
-                      <span onDoubleClick={e => startEditPlayerName(p.id, p.name, e)} className="dock-item-name" title="Doble clic para renombrar">
-                        {p.name}
-                      </span>
-                    )}
-                    <span className="dock-item-status text-muted">
-                      {p.docked ? 'En Banquillo' : 'En Campo'}
-                    </span>
                   </div>
                 </div>
               ))}
