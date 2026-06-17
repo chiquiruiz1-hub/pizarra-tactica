@@ -25,6 +25,14 @@ const centerY = PITCH_HEIGHT / 2;
 const PLAYER_RADIUS = 22;
 const BALL_RADIUS = 12;
 
+const hexToRgba = (hex: string, alpha: number) => {
+  const cleanHex = hex.replace('#', '');
+  const r = parseInt(cleanHex.substring(0, 2), 16) || 255;
+  const g = parseInt(cleanHex.substring(2, 4), 16) || 255;
+  const b = parseInt(cleanHex.substring(4, 6), 16) || 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+
 interface PresentationViewProps {
   plays: SavedPlay[];
   initialPlayId?: string | null;
@@ -179,7 +187,9 @@ export default function PresentationView({ plays, initialPlayId, onClose }: Pres
     (activePlay.drawings || []).forEach(item => {
       ctx.strokeStyle = item.color;
       ctx.fillStyle = item.color;
-      ctx.lineWidth = item.thickness;
+      if (item.type !== 'text') {
+        ctx.lineWidth = item.thickness;
+      }
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
 
@@ -226,6 +236,20 @@ export default function PresentationView({ plays, initialPlayId, onClose }: Pres
         ctx.beginPath();
         ctx.arc(item.center.x, item.center.y, item.radius, 0, 2 * Math.PI);
         ctx.stroke();
+      } else if (item.type === 'zone') {
+        ctx.fillStyle = hexToRgba(item.color, 0.25);
+        const w = item.end.x - item.start.x;
+        const h = item.end.y - item.start.y;
+        ctx.fillRect(item.start.x, item.start.y, w, h);
+        ctx.strokeStyle = item.color;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(item.start.x, item.start.y, w, h);
+      } else if (item.type === 'text') {
+        ctx.fillStyle = item.color;
+        ctx.font = 'bold 20px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(item.text, item.position.x, item.position.y);
       }
     });
 

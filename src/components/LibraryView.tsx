@@ -37,6 +37,10 @@ export default function LibraryView({ plays, onEditPlay, onDeletePlay }: Library
             return { t: 'f', c: dr.color, th: dr.thickness, pts: dr.points.map(pt => [Math.round(pt.x), Math.round(pt.y)]) };
           } else if (dr.type === 'circle') {
             return { t: 'c', c: dr.color, th: dr.thickness, cx: Math.round(dr.center.x), cy: Math.round(dr.center.y), r: Math.round(dr.radius) };
+          } else if (dr.type === 'text') {
+            return { t: 't', c: dr.color, txt: dr.text, px: Math.round(dr.position.x), py: Math.round(dr.position.y) };
+          } else if (dr.type === 'zone') {
+            return { t: 'z', c: dr.color, th: dr.thickness, sx: Math.round(dr.start.x), sy: Math.round(dr.start.y), ex: Math.round(dr.end.x), ey: Math.round(dr.end.y) };
           } else {
             return { t: dr.type === 'arrow' ? 'a' : 'l', c: dr.color, th: dr.thickness, sx: Math.round(dr.start.x), sy: Math.round(dr.start.y), ex: Math.round(dr.end.x), ey: Math.round(dr.end.y) };
           }

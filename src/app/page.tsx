@@ -6,6 +6,7 @@ import TacticalCanvas, { Player, Position, Drawing, EquipmentItem } from '../com
 import LibraryView from '../components/LibraryView';
 import PresentationView from '../components/PresentationView';
 import VideosSection from '../components/VideosSection';
+import ScoutingSection from '../components/ScoutingSection';
 import {
   Home,
   Layers,
@@ -16,7 +17,8 @@ import {
   Menu,
   X,
   Zap,
-  Tv
+  Tv,
+  Shield
 } from 'lucide-react';
 
 export type PlayCategory = 'Táctica' | 'Balón parado' | 'Entrenamiento';
@@ -82,6 +84,10 @@ export default function PizarraProApp() {
             return { type: 'freehand', color: dr.c, thickness: dr.th, points: dr.pts.map((pt: any) => ({ x: pt[0], y: pt[1] })) };
           } else if (dr.t === 'c') {
             return { type: 'circle', color: dr.c, thickness: dr.th, center: { x: dr.cx, y: dr.cy }, radius: dr.r };
+          } else if (dr.t === 't') {
+            return { type: 'text', color: dr.c, text: dr.txt, position: { x: dr.px, y: dr.py } };
+          } else if (dr.t === 'z') {
+            return { type: 'zone', color: dr.c, thickness: dr.th, start: { x: dr.sx, y: dr.sy }, end: { x: dr.ex, y: dr.ey } };
           } else {
             return {
               type: dr.t === 'a' ? 'arrow' : 'line',
@@ -106,7 +112,7 @@ export default function PizarraProApp() {
         setEditorInitialData(loadedPlay);
         
         // Navigate to appropriate section
-        if (secParam === 'tactica' || secParam === 'parado' || secParam === 'entrenamiento' || secParam === 'videos') {
+        if (secParam === 'tactica' || secParam === 'parado' || secParam === 'entrenamiento' || secParam === 'videos' || secParam === 'rivales') {
           setActiveSection(secParam);
         } else {
           setActiveSection('tactica');
@@ -199,6 +205,7 @@ export default function PizarraProApp() {
     { id: 'parado', label: 'Balón Parado', icon: Compass },
     { id: 'entrenamiento', label: 'Entrenamiento', icon: Video },
     { id: 'videos', label: 'Vídeos', icon: Tv },
+    { id: 'rivales', label: 'Rivales', icon: Shield },
     { id: 'biblioteca', label: 'Biblioteca', icon: FolderOpen },
     { id: 'presentacion', label: 'Presentación', icon: Monitor }
   ];
@@ -223,7 +230,7 @@ export default function PizarraProApp() {
                   setActiveSection(item.id);
                   setSidebarOpen(false);
                   // Clear editor data when switching tabs (unless going into edit flow)
-                  if (item.id === 'tactica' || item.id === 'parado' || item.id === 'entrenamiento' || item.id === 'videos') {
+                  if (item.id === 'tactica' || item.id === 'parado' || item.id === 'entrenamiento' || item.id === 'videos' || item.id === 'rivales') {
                     setEditorInitialData(null);
                   }
                 }}
@@ -302,6 +309,13 @@ export default function PizarraProApp() {
               onSave={handleSavePlay}
               initialPlayData={editorInitialData}
             />
+          </div>
+        )}
+
+        {activeSection === 'rivales' && (
+          <div className="view-content fade-in">
+            <h1 className="viewport-title font-gradient">Scouting de Rivales</h1>
+            <ScoutingSection />
           </div>
         )}
 

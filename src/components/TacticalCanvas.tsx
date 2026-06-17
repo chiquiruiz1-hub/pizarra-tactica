@@ -16,7 +16,12 @@ import {
   Video,
   Plus,
   Compass,
-  FileDown
+  FileDown,
+  Monitor,
+  EyeOff,
+  Type,
+  Maximize,
+  Grid
 } from 'lucide-react';
 
 const PITCH_WIDTH = 1200;
@@ -35,10 +40,12 @@ export type Player = {
   id: string;
   team: 'home' | 'away';
   number: number;
+  name: string;
   isGK: boolean;
   x: number;
   y: number;
-  colorTag?: 'blue' | 'red' | 'green' | 'orange';
+  docked: boolean;
+  colorTag?: 'blue' | 'red' | 'yellow' | 'green' | 'orange' | 'purple' | 'white' | 'black';
 };
 
 export type EquipmentItem = {
@@ -52,11 +59,13 @@ export type Drawing =
   | { type: 'freehand'; color: string; thickness: number; points: Position[] }
   | { type: 'line'; color: string; thickness: number; start: Position; end: Position }
   | { type: 'arrow'; color: string; thickness: number; start: Position; end: Position }
-  | { type: 'circle'; color: string; thickness: number; center: Position; radius: number };
+  | { type: 'circle'; color: string; thickness: number; center: Position; radius: number }
+  | { type: 'zone'; color: string; thickness: number; start: Position; end: Position }
+  | { type: 'text'; color: string; text: string; position: Position };
 
 type Frame = {
   timestamp: number;
-  players: { id: string; x: number; y: number; colorTag?: string }[];
+  players: { id: string; x: number; y: number; colorTag?: string; docked: boolean; name: string }[];
   ball: Position;
   equipment?: EquipmentItem[];
 };
@@ -89,10 +98,10 @@ const homeFormations: Record<string, Position[]> = {
     { x: 48, y: 33 }, { x: 48, y: 67 }
   ],
   '5-3-2': [
-    { x: 5, y: 50 }, // GK
-    { x: 22, y: 15 }, { x: 20, y: 32 }, { x: 18, y: 50 }, { x: 20, y: 68 }, { x: 22, y: 85 }, // DEF
-    { x: 36, y: 28 }, { x: 34, y: 50 }, { x: 36, y: 72 }, // MID
-    { x: 48, y: 33 }, { x: 48, y: 67 } // FW
+    { x: 5, y: 50 },
+    { x: 22, y: 15 }, { x: 20, y: 32 }, { x: 18, y: 50 }, { x: 20, y: 68 }, { x: 22, y: 85 },
+    { x: 36, y: 28 }, { x: 34, y: 50 }, { x: 36, y: 72 },
+    { x: 48, y: 33 }, { x: 48, y: 67 }
   ]
 };
 
@@ -123,19 +132,33 @@ const awayFormations: Record<string, Position[]> = {
     { x: 52, y: 67 }, { x: 52, y: 33 }
   ],
   '5-3-2': [
-    { x: 95, y: 50 }, // GK
-    { x: 78, y: 85 }, { x: 80, y: 68 }, { x: 82, y: 50 }, { x: 80, y: 32 }, { x: 78, y: 15 }, // DEF
-    { x: 64, y: 72 }, { x: 66, y: 50 }, { x: 64, y: 28 }, // MID
-    { x: 52, y: 67 }, { x: 52, y: 33 } // FW
+    { x: 95, y: 50 },
+    { x: 78, y: 85 }, { x: 80, y: 68 }, { x: 82, y: 50 }, { x: 80, y: 32 }, { x: 78, y: 15 },
+    { x: 64, y: 72 }, { x: 66, y: 50 }, { x: 64, y: 28 },
+    { x: 52, y: 67 }, { x: 52, y: 33 }
   ]
 };
 
-// Convert percentage coordinates to canvas points
-const pctToCanvas = (pctX: number, pctY: number): Position => {
+const defaultPlayerNames: Record<string, string> = {
+  home_1: 'Portero (L)', home_2: 'Def. Izquierdo', home_3: 'Central Izq.', home_4: 'Central Der.', home_5: 'Def. Derecho',
+  home_6: 'Medio Centro', home_7: 'Interior Izq.', home_8: 'Interior Der.', home_9: 'Extremo Izq.', home_10: 'Delantero Centro', home_11: 'Extremo Der.',
+  away_1: 'Portero (V)', away_2: 'Def. Izquierdo', away_3: 'Central Izq.', away_4: 'Central Der.', away_5: 'Def. Derecho',
+  away_6: 'Medio Centro', away_7: 'Interior Izq.', away_8: 'Interior Der.', away_9: 'Extremo Izq.', away_10: 'Delantero Centro', away_11: 'Extremo Der.'
+};
+
+const pctToCanvas = (xPct: number, yPct: number) => {
   return {
-    x: MARGIN + (pctX / 100) * PLAY_WIDTH,
-    y: MARGIN + (pctY / 100) * PLAY_HEIGHT
+    x: MARGIN + (xPct / 100) * PLAY_WIDTH,
+    y: MARGIN + (yPct / 100) * PLAY_HEIGHT
   };
+};
+
+const hexToRgba = (hex: string, alpha: number) => {
+  const cleanHex = hex.replace('#', '');
+  const r = parseInt(cleanHex.substring(0, 2), 16) || 255;
+  const g = parseInt(cleanHex.substring(2, 4), 16) || 255;
+  const b = parseInt(cleanHex.substring(4, 6), 16) || 255;
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 };
 
 interface TacticalCanvasProps {
@@ -157,7 +180,7 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
   const [pitchType, setPitchType] = useState<'full' | 'half'>('full');
   const [formHome, setFormHome] = useState<string>('4-3-3');
   const [formAway, setFormAway] = useState<string>('4-4-2');
-  const [toolMode, setToolMode] = useState<'move' | 'arrow' | 'freehand' | 'line' | 'circle'>('move');
+  const [toolMode, setToolMode] = useState<'move' | 'arrow' | 'freehand' | 'line' | 'circle' | 'zone' | 'text'>('move');
   const [drawingColor, setDrawingColor] = useState<string>('#ffffff');
   const [drawingThickness, setDrawingThickness] = useState<number>(4);
 
@@ -166,6 +189,11 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
   const [ball, setBall] = useState<Position>({ x: PITCH_WIDTH / 2, y: PITCH_HEIGHT / 2 });
   const [equipment, setEquipment] = useState<EquipmentItem[]>([]);
   const [selectedPlayerId, setSelectedPlayerId] = useState<string | null>(null);
+  const [draggingItem, setDraggingItem] = useState<{ type: 'ball' | 'player' | 'equipment'; id?: string } | null>(null);
+
+  // Editable Player Name States
+  const [editingPlayerId, setEditingPlayerId] = useState<string | null>(null);
+  const [editingName, setEditingName] = useState('');
 
   // Drawings
   const [drawings, setDrawings] = useState<Drawing[]>([]);
@@ -182,24 +210,32 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
     equipment: EquipmentItem[];
   } | null>(null);
 
+  // Timer HUD States
+  const [timerSeries, setTimerSeries] = useState(3);
+  const [timerDuration, setTimerDuration] = useState(300); // 5 minutes
+  const [currentSerie, setCurrentSerie] = useState(1);
+  const [timeLeft, setTimeLeft] = useState(300);
+  const [timerRunning, setTimerRunning] = useState(false);
+  const [exerciseDesc, setExerciseDesc] = useState('');
+  const [availablePlayersCount, setAvailablePlayersCount] = useState(11);
+
+  // Presentation Mode States
+  const [isPresentationMode, setIsPresentationMode] = useState(false);
+  const [zoomScale, setZoomScale] = useState(1);
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [laserPos, setLaserPos] = useState<{ x: number; y: number } | null>(null);
+  const [isDraggingCanvas, setIsDraggingCanvas] = useState(false);
+  const dragStartRef = useRef({ x: 0, y: 0 });
+
   // UI Status
   const [shareCopied, setShareCopied] = useState(false);
   const [saveName, setSaveName] = useState('');
   const [showSaveModal, setShowSaveModal] = useState(false);
 
-  // Background Image State
-  const [bgImage, setBgImage] = useState<HTMLImageElement | null>(null);
-
-  useEffect(() => {
-    const bgSrc = backgroundImage || (initialPlayData && (initialPlayData as any).backgroundImage);
-    if (bgSrc) {
-      const img = new Image();
-      img.src = bgSrc;
-      img.onload = () => setBgImage(img);
-    } else {
-      setBgImage(null);
-    }
-  }, [backgroundImage, initialPlayData]);
+  // Local saved plays for keyboard paging
+  const [savedPlaysList, setSavedPlaysList] = useState<any[]>([]);
+  const [currentPlayIndex, setCurrentPlayIndex] = useState(-1);
+  const activePlay = currentPlayIndex >= 0 ? savedPlaysList[currentPlayIndex] : null;
 
   // Canvas ref
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -216,69 +252,160 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
   const recordingIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const playbackAnimRef = useRef<number | null>(null);
 
+  // Background Image State
+  const [bgImage, setBgImage] = useState<HTMLImageElement | null>(null);
+
+  useEffect(() => {
+    const bgSrc = backgroundImage || (initialPlayData && (initialPlayData as any).backgroundImage);
+    if (bgSrc) {
+      const img = new Image();
+      img.src = bgSrc;
+      img.onload = () => setBgImage(img);
+    } else {
+      setBgImage(null);
+    }
+  }, [backgroundImage, initialPlayData]);
+
+  // Fetch local library items for paging
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('pizarrapro_plays');
+      if (saved) {
+        setSavedPlaysList(JSON.parse(saved));
+      }
+    } catch (e) {}
+  }, []);
+
+  // Keyboard navigation for presentation mode & Ctrl+Z Undo
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // 1. Ctrl+Z Undo drawing
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+        e.preventDefault();
+        setDrawings(prev => prev.slice(0, -1));
+        return;
+      }
+
+      // 2. Fullscreen arrow keys pagination
+      if (isPresentationMode && savedPlaysList.length > 0) {
+        if (e.key === 'ArrowRight') {
+          e.preventDefault();
+          setCurrentPlayIndex(prev => {
+            const nextIdx = prev >= savedPlaysList.length - 1 ? 0 : prev + 1;
+            loadSpecificPlay(savedPlaysList[nextIdx]);
+            return nextIdx;
+          });
+        } else if (e.key === 'ArrowLeft') {
+          e.preventDefault();
+          setCurrentPlayIndex(prev => {
+            const nextIdx = prev <= 0 ? savedPlaysList.length - 1 : prev - 1;
+            loadSpecificPlay(savedPlaysList[nextIdx]);
+            return nextIdx;
+          });
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isPresentationMode, savedPlaysList]);
+
+  // Load a play from the paging list
+  const loadSpecificPlay = (play: any) => {
+    setPlayers(play.players);
+    setBall(play.ball);
+    setDrawings(play.drawings);
+    setPitchType(play.pitchType);
+    setEquipment(play.equipment || []);
+    setZoomScale(1.0);
+    setPanOffset({ x: 0, y: 0 });
+  };
+
+  // Timer useEffect logic
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+    if (timerRunning && timeLeft > 0) {
+      interval = setInterval(() => {
+        setTimeLeft(prev => {
+          if (prev <= 1) {
+            if (currentSerie < timerSeries) {
+              setCurrentSerie(c => c + 1);
+              return timerDuration;
+            } else {
+              setTimerRunning(false);
+              return 0;
+            }
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } else {
+      if (interval) clearInterval(interval);
+    }
+    return () => { if (interval) clearInterval(interval); };
+  }, [timerRunning, timeLeft, currentSerie, timerSeries, timerDuration]);
+
+  // Format time remaining
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
   // Default formation generator
   const resetToFormations = useCallback((fH: string, fA: string, currentPitch: 'full' | 'half') => {
     const defaultPlayers: Player[] = [];
     
-    if (currentPitch === 'full') {
-      const hCoords = homeFormations[fH];
-      for (let i = 0; i < 11; i++) {
-        const pt = pctToCanvas(hCoords[i].x, hCoords[i].y);
-        defaultPlayers.push({
-          id: `home_${i + 1}`,
-          team: 'home',
-          number: i + 1,
-          isGK: i === 0,
-          x: pt.x,
-          y: pt.y
-        });
-      }
-
-      const aCoords = awayFormations[fA];
-      for (let i = 0; i < 11; i++) {
-        const pt = pctToCanvas(aCoords[i].x, aCoords[i].y);
-        defaultPlayers.push({
-          id: `away_${i + 1}`,
-          team: 'away',
-          number: i + 1,
-          isGK: i === 0,
-          x: pt.x,
-          y: pt.y
-        });
-      }
-      setBall({ x: PITCH_WIDTH / 2, y: PITCH_HEIGHT / 2 });
-    } else {
-      // Half pitch (focus left goal, players placed on the left side)
-      const hCoords = homeFormations[fH];
-      for (let i = 0; i < 11; i++) {
-        // Map Home team coordinates to scale on the half pitch (midfield line is on the right)
-        // Left goal is at x=150, Midfield at x=1150
-        const xPct = hCoords[i].x; // 0 to 50
-        const xHalf = 150 + (xPct / 50) * 1000;
-        const yHalf = MARGIN + (hCoords[i].y / 100) * PLAY_HEIGHT;
-        defaultPlayers.push({
-          id: `home_${i + 1}`,
-          team: 'home',
-          number: i + 1,
-          isGK: i === 0,
-          x: xHalf,
-          y: yHalf
-        });
-      }
-      // Put Away team GK and 2 defenders on half pitch too, representing opponent defenders
-      defaultPlayers.push({ id: `away_1`, team: 'away', number: 1, isGK: true, x: 190, y: centerY });
-      defaultPlayers.push({ id: `away_2`, team: 'away', number: 2, isGK: false, x: 350, y: centerY - 150 });
-      defaultPlayers.push({ id: `away_3`, team: 'away', number: 3, isGK: false, x: 350, y: centerY + 150 });
-      defaultPlayers.push({ id: `away_4`, team: 'away', number: 4, isGK: false, x: 450, y: centerY });
-
-      setBall({ x: 600, y: centerY });
+    // 1. Home squad (docked = true by default)
+    const hCoords = homeFormations[fH];
+    for (let i = 0; i < 11; i++) {
+      const pt = pctToCanvas(hCoords[i].x, hCoords[i].y);
+      defaultPlayers.push({
+        id: `home_${i + 1}`,
+        team: 'home',
+        number: i + 1,
+        name: defaultPlayerNames[`home_${i + 1}`],
+        isGK: i === 0,
+        x: pt.x,
+        y: pt.y,
+        docked: true
+      });
     }
+
+    // 2. Away squad (docked = true by default)
+    const aCoords = awayFormations[fA];
+    for (let i = 0; i < 11; i++) {
+      const pt = pctToCanvas(aCoords[i].x, aCoords[i].y);
+      defaultPlayers.push({
+        id: `away_${i + 1}`,
+        team: 'away',
+        number: i + 1,
+        name: defaultPlayerNames[`away_${i + 1}`],
+        isGK: i === 0,
+        x: pt.x,
+        y: pt.y,
+        docked: true
+      });
+    }
+
+    // 3. Special Referee token (docked = true by default)
+    defaultPlayers.push({
+      id: 'referee',
+      team: 'home',
+      number: 0,
+      name: 'Árbitro',
+      isGK: false,
+      x: PITCH_WIDTH / 2,
+      y: centerY,
+      docked: true
+    });
 
     setPlayers(defaultPlayers);
     setEquipment([]);
     setDrawings([]);
     setActiveDrawing(null);
     setSelectedPlayerId(null);
+    setBall({ x: PITCH_WIDTH / 2, y: PITCH_HEIGHT / 2 });
     setInitialState({
       players: defaultPlayers,
       ball: currentPitch === 'full' ? { x: PITCH_WIDTH / 2, y: PITCH_HEIGHT / 2 } : { x: 600, y: centerY },
@@ -306,7 +433,6 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
     }
   }, [initialPlayData, resetToFormations]);
 
-  // Handle formation selection change
   const handleHomeFormationChange = (val: string) => {
     setFormHome(val);
     resetToFormations(val, formAway, pitchType);
@@ -317,238 +443,136 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
     resetToFormations(formHome, val, pitchType);
   };
 
-  // Toggle Pitch Type
   const handlePitchTypeToggle = (type: 'full' | 'half') => {
     setPitchType(type);
     resetToFormations(formHome, formAway, type);
   };
 
-  // Set Pieces positioning templates (Balón Parado)
-  const applySetPiecePreset = (preset: string) => {
-    setIsPlaying(false);
-    setIsRecording(false);
+  // Preset Sessions mutator
+  const applySessionPreset = (preset: string) => {
     setDrawings([]);
     setEquipment([]);
     setSelectedPlayerId(null);
 
-    const activePlayers = [...players];
-    const newBall = { ...ball };
+    let newPlayers = players.map(p => ({ ...p, docked: true }));
+    let newBall = { x: PITCH_WIDTH / 2, y: PITCH_HEIGHT / 2 };
+    let newEquipment: EquipmentItem[] = [];
 
-    // Standard positions for set pieces
-    if (preset === 'corner_right') {
-      newBall.x = 1150;
-      newBall.y = 750;
+    const deploy = (id: string, x: number, y: number) => {
+      newPlayers = newPlayers.map(p => p.id === id ? { ...p, x, y, docked: false } : p);
+    };
 
-      // Home (attacks right goal)
-      const homePositions: Record<number, Position> = {
-        1: { x: 150, y: centerY }, // GK
-        2: { x: 750, y: 220 }, // DEF back
-        3: { x: 750, y: 580 }, // DEF back
-        4: { x: 920, y: centerY }, // MID box edge
-        5: { x: 980, y: centerY - 150 }, // MID
-        6: { x: 1040, y: centerY - 80 }, // FWD box
-        7: { x: 1050, y: centerY + 80 }, // FWD box
-        8: { x: 1080, y: centerY - 20 }, // FWD box
-        9: { x: 1090, y: centerY + 30 }, // FWD box
-        10: { x: 1010, y: centerY + 180 }, // FWD box edge
-        11: { x: 1140, y: 710 } // Kicker
-      };
+    if (preset === 'rondo_4v1') {
+      deploy('home_1', 500, 300);
+      deploy('home_2', 500, 500);
+      deploy('home_3', 700, 300);
+      deploy('home_4', 700, 500);
+      deploy('away_2', 600, 400);
 
-      // Away (defends right goal)
-      const awayPositions: Record<number, Position> = {
-        1: { x: 1130, y: centerY }, // GK
-        2: { x: 1120, y: centerY - 40 }, // DEF marking
-        3: { x: 1120, y: centerY + 40 }, // DEF marking
-        4: { x: 1085, y: centerY - 30 }, // DEF
-        5: { x: 1095, y: centerY + 25 }, // DEF
-        6: { x: 1050, y: centerY - 95 }, // DEF
-        7: { x: 1060, y: centerY + 95 }, // DEF
-        8: { x: 1025, y: centerY - 145 }, // MID
-        9: { x: 1020, y: centerY + 175 }, // MID
-        10: { x: 930, y: centerY }, // MID marking edge
-        11: { x: 800, y: centerY } // FWD counter
-      };
+      newEquipment = [
+        { id: 'c1', type: 'cone', x: 450, y: 250 },
+        { id: 'c2', type: 'cone', x: 450, y: 550 },
+        { id: 'c3', type: 'cone', x: 750, y: 250 },
+        { id: 'c4', type: 'cone', x: 750, y: 550 }
+      ];
+      newBall = { x: 500, y: 300 };
+      setExerciseDesc('Rondo de posesión 4 contra 1. El objetivo es mantener el balón en espacios reducidos superando al defensor central.');
+    } else if (preset === 'rondo_6v2') {
+      deploy('home_1', 450, 400);
+      deploy('home_2', 520, 280);
+      deploy('home_3', 680, 280);
+      deploy('home_4', 750, 400);
+      deploy('home_5', 680, 520);
+      deploy('home_6', 520, 520);
 
-      activePlayers.forEach(p => {
-        const coords = p.team === 'home' ? homePositions[p.number] : awayPositions[p.number];
-        if (coords) {
-          p.x = coords.x;
-          p.y = coords.y;
+      deploy('away_2', 560, 400);
+      deploy('away_3', 640, 400);
+
+      newEquipment = [
+        { id: 'c1', type: 'cone', x: 400, y: 400 },
+        { id: 'c2', type: 'cone', x: 490, y: 220 },
+        { id: 'c3', type: 'cone', x: 710, y: 220 },
+        { id: 'c4', type: 'cone', x: 800, y: 400 },
+        { id: 'c5', type: 'cone', x: 710, y: 580 },
+        { id: 'c6', type: 'cone', x: 490, y: 580 }
+      ];
+      newBall = { x: 450, y: 400 };
+      setExerciseDesc('Rondo 6 contra 2. Trabajo de conservación, pases rápidos a un toque y presión intensa de los dos defensores del centro.');
+    } else if (preset === 'pressing_alto') {
+      deploy('home_1', 100, 400); // GK
+      deploy('home_9', 900, 230); // wingers press
+      deploy('home_11', 900, 570);
+      deploy('home_10', 930, 400); // striker press
+      deploy('home_8', 800, 300);
+      deploy('home_7', 800, 500);
+      deploy('home_6', 730, 400);
+      deploy('home_2', 580, 150);
+      deploy('home_3', 580, 320);
+      deploy('home_4', 580, 480);
+      deploy('home_5', 580, 650);
+
+      deploy('away_1', 1130, 400); // GK opponent
+      deploy('away_2', 1040, 240); // RCB
+      deploy('away_3', 1040, 560); // LCB
+      deploy('away_4', 1080, 110); // RB
+      deploy('away_5', 1080, 690); // LB
+      deploy('away_6', 950, 400); // DM
+
+      newBall = { x: 1040, y: 240 };
+      setExerciseDesc('Simulación de presión alta en salida de balón rival. Bloque ofensivo alto para asfixiar la salida del oponente.');
+    } else if (preset === 'transicion_rapida') {
+      deploy('home_1', 100, 400);
+      deploy('home_6', 550, 300); // gets ball
+      deploy('home_9', 750, 140); // wingers sprint
+      deploy('home_11', 750, 660);
+      deploy('home_10', 820, 400); // CF central run
+      deploy('home_8', 600, 440);
+
+      deploy('away_1', 1130, 400);
+      deploy('away_2', 860, 330);
+      deploy('away_3', 860, 470);
+
+      newBall = { x: 550, y: 300 };
+      setExerciseDesc('Transición ofensiva rápida (contraataque). Apertura a bandas para desdoblamiento veloz buscando portería contraria.');
+    } else if (preset === 'juego_posicion') {
+      // Draw grid cones
+      newEquipment = [
+        { id: 'c1', type: 'cone', x: 300, y: 220 }, { id: 'c2', type: 'cone', x: 600, y: 220 }, { id: 'c3', type: 'cone', x: 900, y: 220 },
+        { id: 'c4', type: 'cone', x: 300, y: 580 }, { id: 'c5', type: 'cone', x: 600, y: 580 }, { id: 'c6', type: 'cone', x: 900, y: 580 }
+      ];
+      // Deploy squad
+      newPlayers = newPlayers.map((p, idx) => {
+        if (idx < 11) {
+          const hC = homeFormations['4-3-3'][idx];
+          const pt = pctToCanvas(hC.x, hC.y);
+          return { ...p, x: pt.x, y: pt.y, docked: false };
         }
+        return p;
       });
-    } else if (preset === 'corner_left') {
-      newBall.x = 1150;
-      newBall.y = 50;
+      newBall = { x: 600, y: 400 };
+      setExerciseDesc('Juego de posición. Creación de líneas de pase en canales interiores y exteriores, respetando la estructura zonal del campo.');
+    } else if (preset === 'amplitud') {
+      newEquipment = [
+        { id: 'c1', type: 'cone', x: 300, y: MARGIN }, { id: 'c2', type: 'cone', x: 600, y: MARGIN }, { id: 'c3', type: 'cone', x: 900, y: MARGIN },
+        { id: 'c4', type: 'cone', x: 300, y: PITCH_HEIGHT - MARGIN }, { id: 'c5', type: 'cone', x: 600, y: PITCH_HEIGHT - MARGIN }, { id: 'c6', type: 'cone', x: 900, y: PITCH_HEIGHT - MARGIN }
+      ];
+      deploy('home_9', 600, 75); // wingers wide
+      deploy('home_11', 600, 725);
+      deploy('home_10', 850, 400);
+      deploy('home_6', 500, 400);
 
-      // Home (attacks right goal)
-      const homePositions: Record<number, Position> = {
-        1: { x: 150, y: centerY },
-        2: { x: 750, y: 220 },
-        3: { x: 750, y: 580 },
-        4: { x: 920, y: centerY },
-        5: { x: 980, y: centerY + 150 },
-        6: { x: 1040, y: centerY + 80 },
-        7: { x: 1050, y: centerY - 80 },
-        8: { x: 1080, y: centerY + 20 },
-        9: { x: 1090, y: centerY - 30 },
-        10: { x: 1010, y: centerY - 180 },
-        11: { x: 1140, y: 90 } // Kicker
-      };
-
-      // Away (defends right goal)
-      const awayPositions: Record<number, Position> = {
-        1: { x: 1130, y: centerY },
-        2: { x: 1120, y: centerY + 40 },
-        3: { x: 1120, y: centerY - 40 },
-        4: { x: 1085, y: centerY + 30 },
-        5: { x: 1095, y: centerY - 25 },
-        6: { x: 1050, y: centerY + 95 },
-        7: { x: 1060, y: centerY - 95 },
-        8: { x: 1025, y: centerY + 145 },
-        9: { x: 1020, y: centerY - 175 },
-        10: { x: 930, y: centerY },
-        11: { x: 800, y: centerY }
-      };
-
-      activePlayers.forEach(p => {
-        const coords = p.team === 'home' ? homePositions[p.number] : awayPositions[p.number];
-        if (coords) {
-          p.x = coords.x;
-          p.y = coords.y;
-        }
-      });
-    } else if (preset === 'falta_lateral') {
-      newBall.x = 900;
-      newBall.y = 120;
-
-      // Home (attacks right goal)
-      const homePositions: Record<number, Position> = {
-        1: { x: 150, y: centerY },
-        2: { x: 650, y: 220 },
-        3: { x: 650, y: 580 },
-        4: { x: 920, y: centerY - 50 },
-        5: { x: 930, y: centerY + 50 },
-        6: { x: 980, y: centerY - 100 },
-        7: { x: 985, y: centerY + 100 },
-        8: { x: 1020, y: centerY - 30 },
-        9: { x: 1020, y: centerY + 30 },
-        10: { x: 880, y: 150 }, // Support
-        11: { x: 890, y: 80 } // Kicker
-      };
-
-      // Away (defends right goal)
-      const awayPositions: Record<number, Position> = {
-        1: { x: 1130, y: centerY },
-        2: { x: 975, y: 90 }, // Wall 1
-        3: { x: 980, y: 125 }, // Wall 2
-        4: { x: 940, y: centerY - 60 }, // Def offside line
-        5: { x: 945, y: centerY + 65 },
-        6: { x: 950, y: centerY - 10 },
-        7: { x: 990, y: centerY - 120 },
-        8: { x: 995, y: centerY + 120 },
-        9: { x: 1010, y: centerY - 45 },
-        10: { x: 1010, y: centerY + 45 },
-        11: { x: 820, y: 350 }
-      };
-
-      activePlayers.forEach(p => {
-        const coords = p.team === 'home' ? homePositions[p.number] : awayPositions[p.number];
-        if (coords) {
-          p.x = coords.x;
-          p.y = coords.y;
-        }
-      });
-    } else if (preset === 'falta_frontal') {
-      newBall.x = 880;
-      newBall.y = centerY;
-
-      // Home (attacks right goal)
-      const homePositions: Record<number, Position> = {
-        1: { x: 150, y: centerY },
-        2: { x: 650, y: 220 },
-        3: { x: 650, y: 580 },
-        4: { x: 860, y: centerY - 40 }, // decoy
-        5: { x: 940, y: centerY - 130 },
-        6: { x: 940, y: centerY + 130 },
-        7: { x: 990, y: centerY - 60 },
-        8: { x: 990, y: centerY + 60 },
-        9: { x: 1030, y: centerY - 20 },
-        10: { x: 1030, y: centerY + 20 },
-        11: { x: 870, y: centerY + 30 } // kicker
-      };
-
-      // Away (defends right goal)
-      const awayPositions: Record<number, Position> = {
-        1: { x: 1130, y: centerY },
-        2: { x: 970, y: centerY - 75 }, // Wall
-        3: { x: 970, y: centerY - 38 },
-        4: { x: 970, y: centerY },
-        5: { x: 970, y: centerY + 38 },
-        6: { x: 970, y: centerY + 75 },
-        7: { x: 950, y: centerY - 150 }, // Def flank
-        8: { x: 950, y: centerY + 150 }, // Def flank
-        9: { x: 1000, y: centerY - 80 },
-        10: { x: 1000, y: centerY + 80 },
-        11: { x: 800, y: centerY }
-      };
-
-      activePlayers.forEach(p => {
-        const coords = p.team === 'home' ? homePositions[p.number] : awayPositions[p.number];
-        if (coords) {
-          p.x = coords.x;
-          p.y = coords.y;
-        }
-      });
-    } else if (preset === 'penalti') {
-      newBall.x = 1040;
-      newBall.y = centerY;
-
-      // Home (attacks right goal)
-      const homePositions: Record<number, Position> = {
-        1: { x: 150, y: centerY },
-        2: { x: 800, y: 220 },
-        3: { x: 800, y: 580 },
-        4: { x: 930, y: centerY - 110 },
-        5: { x: 930, y: centerY + 110 },
-        6: { x: 950, y: centerY - 200 },
-        7: { x: 950, y: centerY + 200 },
-        8: { x: 910, y: centerY - 60 },
-        9: { x: 1010, y: centerY + 20 }, // Kicker
-        10: { x: 910, y: centerY + 60 },
-        11: { x: 920, y: centerY }
-      };
-
-      // Away (defends right goal)
-      const awayPositions: Record<number, Position> = {
-        1: { x: 1145, y: centerY }, // GK
-        2: { x: 940, y: centerY - 130 },
-        3: { x: 940, y: centerY + 130 },
-        4: { x: 960, y: centerY - 180 },
-        5: { x: 960, y: centerY + 180 },
-        6: { x: 935, y: centerY - 80 },
-        7: { x: 935, y: centerY + 80 },
-        8: { x: 925, y: centerY - 30 },
-        9: { x: 925, y: centerY + 30 },
-        10: { x: 900, y: centerY - 100 },
-        11: { x: 900, y: centerY + 100 }
-      };
-
-      activePlayers.forEach(p => {
-        const coords = p.team === 'home' ? homePositions[p.number] : awayPositions[p.number];
-        if (coords) {
-          p.x = coords.x;
-          p.y = coords.y;
-        }
-      });
+      newBall = { x: 600, y: 75 };
+      setExerciseDesc('Juego de amplitud táctica. Obligación de pasar por carriles laterales (delimitados por conos) para estirar defensas cerradas.');
     }
 
-    setPlayers(activePlayers);
+    setPlayers(newPlayers);
+    setEquipment(newEquipment);
     setBall(newBall);
     setInitialState({
-      players: activePlayers.map(p => ({ ...p })),
+      players: newPlayers.map(p => ({ ...p })),
       ball: newBall,
       drawings: [],
-      equipment: []
+      equipment: newEquipment
     });
   };
 
@@ -564,12 +588,60 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
     setEquipment(prev => [...prev, newItem]);
   };
 
-  // Label player with color group (Training mode only)
-  const setPlayerColorTag = (tag: 'blue' | 'red' | 'green' | 'orange' | undefined) => {
+  // Tag color tag label
+  const setPlayerColorTag = (tag: any) => {
     if (!selectedPlayerId) return;
     setPlayers(prev =>
       prev.map(p => (p.id === selectedPlayerId ? { ...p, colorTag: tag } : p))
     );
+  };
+
+  // HTML5 Drag Start in Docks
+  const handleDockDragStart = (e: React.DragEvent, id: string) => {
+    e.dataTransfer.setData('text/plain', id);
+  };
+
+  // Drop on Canvas
+  const handleCanvasDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
+
+  const handleCanvasDrop = (e: React.DragEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const playerId = e.dataTransfer.getData('text/plain');
+    if (!playerId) return;
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (e.clientX - rect.left) * scaleX;
+    const y = (e.clientY - rect.top) * scaleY;
+
+    const cx = Math.max(0, Math.min(canvas.width, x));
+    const cy = Math.max(0, Math.min(canvas.height, y));
+
+    setPlayers(prev =>
+      prev.map(p => (p.id === playerId ? { ...p, x: cx, y: cy, docked: false } : p))
+    );
+  };
+
+  // Double click name edit in docks
+  const startEditPlayerName = (id: string, name: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setEditingPlayerId(id);
+    setEditingName(name);
+  };
+
+  const savePlayerName = () => {
+    if (editingPlayerId && editingName.trim()) {
+      setPlayers(prev =>
+        prev.map(p => (p.id === editingPlayerId ? { ...p, name: editingName.trim() } : p))
+      );
+    }
+    setEditingPlayerId(null);
   };
 
   // Recording ticks
@@ -579,7 +651,7 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
       setRecordingFrames([
         {
           timestamp: 0,
-          players: playersRef.current.map(p => ({ id: p.id, x: p.x, y: p.y, colorTag: p.colorTag })),
+          players: playersRef.current.map(p => ({ id: p.id, x: p.x, y: p.y, colorTag: p.colorTag, name: p.name, docked: p.docked })),
           ball: { ...ballRef.current },
           equipment: equipmentRef.current.map(e => ({ ...e }))
         }
@@ -591,12 +663,12 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
           ...prev,
           {
             timestamp: elapsed,
-            players: playersRef.current.map(p => ({ id: p.id, x: p.x, y: p.y, colorTag: p.colorTag })),
+            players: playersRef.current.map(p => ({ id: p.id, x: p.x, y: p.y, colorTag: p.colorTag, name: p.name, docked: p.docked })),
             ball: { ...ballRef.current },
             equipment: equipmentRef.current.map(e => ({ ...e }))
           }
         ]);
-      }, 40); // 25fps sampling
+      }, 40);
     } else {
       if (recordingIntervalRef.current) {
         clearInterval(recordingIntervalRef.current);
@@ -620,13 +692,12 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
 
         if (elapsed >= lastFrame.timestamp) {
           setIsPlaying(false);
-          // Set to final positions
           setPlayers(prev =>
             prev.map(p => {
               const pf = lastFrame.players.find(x => x.id === p.id);
               if (pf) {
-                const tagColor = pf.colorTag as 'blue' | 'red' | 'green' | 'orange' | undefined;
-                return { ...p, x: pf.x, y: pf.y, colorTag: tagColor };
+                const tagColor = pf.colorTag as any;
+                return { ...p, x: pf.x, y: pf.y, colorTag: tagColor, docked: pf.docked, name: pf.name };
               }
               return p;
             })
@@ -636,7 +707,6 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
             setEquipment(lastFrame.equipment.map(e => ({ ...e })));
           }
         } else {
-          // Find adjacent frames
           let f1 = recordingFrames[0];
           let f2 = recordingFrames[recordingFrames.length - 1];
 
@@ -651,31 +721,30 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
           const timeDiff = f2.timestamp - f1.timestamp;
           const ratio = timeDiff === 0 ? 0 : (elapsed - f1.timestamp) / timeDiff;
 
-          // Interpolate player positions
           setPlayers(prev =>
             prev.map(p => {
               const p1 = f1.players.find(x => x.id === p.id);
               const p2 = f2.players.find(x => x.id === p.id);
               if (p1 && p2) {
-                const tagColor = p2.colorTag as 'blue' | 'red' | 'green' | 'orange' | undefined;
+                const tagColor = p2.colorTag as any;
                 return {
                   ...p,
                   x: p1.x + (p2.x - p1.x) * ratio,
                   y: p1.y + (p2.y - p1.y) * ratio,
-                  colorTag: tagColor
+                  colorTag: tagColor,
+                  docked: p2.docked,
+                  name: p2.name
                 };
               }
               return p;
             })
           );
 
-          // Interpolate ball position
           setBall({
             x: f1.ball.x + (f2.ball.x - f1.ball.x) * ratio,
             y: f1.ball.y + (f2.ball.y - f1.ball.y) * ratio
           });
 
-          // Interpolate equipment positions
           if (f1.equipment && f2.equipment) {
             setEquipment(prev =>
               prev.map(e => {
@@ -711,12 +780,6 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
     };
   }, [isPlaying, recordingFrames]);
 
-  // Dragging state
-  const [draggingItem, setDraggingItem] = useState<{
-    type: 'player' | 'ball' | 'equipment';
-    id?: string;
-  } | null>(null);
-
   // Field Drawing Utility
   const drawPitch = (ctx: CanvasRenderingContext2D) => {
     if (bgImage) {
@@ -728,7 +791,6 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
       ctx.fillRect(0, 0, PITCH_WIDTH, PITCH_HEIGHT);
 
       if (pitchType === 'full') {
-        // Grass Stripes
         const stripesCount = 15;
         const stripeWidth = PLAY_WIDTH / stripesCount;
         for (let i = 0; i < stripesCount; i++) {
@@ -751,35 +813,28 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
       ctx.lineCap = 'round';
       ctx.lineJoin = 'miter';
 
-      // Pitch Boundary
       ctx.strokeRect(MARGIN, MARGIN, PLAY_WIDTH, PLAY_HEIGHT);
 
-      // Midfield Line
       ctx.beginPath();
       ctx.moveTo(PITCH_WIDTH / 2, MARGIN);
       ctx.lineTo(PITCH_WIDTH / 2, PITCH_HEIGHT - MARGIN);
       ctx.stroke();
 
-      // Center Circle
       ctx.beginPath();
       ctx.arc(PITCH_WIDTH / 2, centerY, 90, 0, 2 * Math.PI);
       ctx.stroke();
 
-      // Center Spot
       ctx.beginPath();
       ctx.fillStyle = '#ffffff';
       ctx.arc(PITCH_WIDTH / 2, centerY, 5, 0, 2 * Math.PI);
       ctx.fill();
 
-      // Penalty Areas
       ctx.strokeRect(MARGIN, centerY - 200, 165, 400);
       ctx.strokeRect(PITCH_WIDTH - MARGIN - 165, centerY - 200, 165, 400);
 
-      // Goal Areas
       ctx.strokeRect(MARGIN, centerY - 90, 55, 180);
       ctx.strokeRect(PITCH_WIDTH - MARGIN - 55, centerY - 90, 55, 180);
 
-      // Penalty Spots
       ctx.beginPath();
       ctx.arc(MARGIN + 120, centerY, 5, 0, 2 * Math.PI);
       ctx.fill();
@@ -787,7 +842,6 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
       ctx.arc(PITCH_WIDTH - MARGIN - 120, centerY, 5, 0, 2 * Math.PI);
       ctx.fill();
 
-      // Penalty Arcs
       const arcAngle = Math.acos(55 / 90);
       ctx.beginPath();
       ctx.arc(MARGIN + 120, centerY, 90, -arcAngle, arcAngle);
@@ -796,19 +850,16 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
       ctx.arc(PITCH_WIDTH - MARGIN - 120, centerY, 90, Math.PI - arcAngle, Math.PI + arcAngle);
       ctx.stroke();
 
-      // Corners
       ctx.beginPath(); ctx.arc(MARGIN, MARGIN, 15, 0, 0.5 * Math.PI); ctx.stroke();
       ctx.beginPath(); ctx.arc(MARGIN, PITCH_HEIGHT - MARGIN, 15, 1.5 * Math.PI, 2 * Math.PI); ctx.stroke();
       ctx.beginPath(); ctx.arc(PITCH_WIDTH - MARGIN, MARGIN, 15, 0.5 * Math.PI, Math.PI); ctx.stroke();
       ctx.beginPath(); ctx.arc(PITCH_WIDTH - MARGIN, PITCH_HEIGHT - MARGIN, 15, Math.PI, 1.5 * Math.PI); ctx.stroke();
 
-      // Goals
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 3;
       ctx.strokeRect(MARGIN - 30, centerY - 38, 30, 76);
       ctx.strokeRect(PITCH_WIDTH - MARGIN, centerY - 38, 30, 76);
 
-      // Goal Nets
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
@@ -826,53 +877,41 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
       }
       ctx.stroke();
     } else {
-      // Stretches left-half pitch
-
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
       ctx.lineWidth = 4;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'miter';
 
-      // Pitch boundary
       ctx.strokeRect(MARGIN, MARGIN, PLAY_WIDTH, PLAY_HEIGHT);
 
-      // Penalty Area
       ctx.strokeRect(MARGIN, centerY - 280, 330, 560);
 
-      // Goal Area
       ctx.strokeRect(MARGIN, centerY - 120, 110, 240);
 
-      // Penalty Spot
       ctx.beginPath();
       ctx.arc(MARGIN + 240, centerY, 5, 0, 2 * Math.PI);
       ctx.fill();
 
-      // Penalty Arc (centered at spot with radius 180)
       const arcAngle = Math.acos(90 / 180);
       ctx.beginPath();
       ctx.arc(MARGIN + 240, centerY, 180, -arcAngle, arcAngle);
       ctx.stroke();
 
-      // Midfield line circle (centered at x = 1150, radius 180)
       ctx.beginPath();
       ctx.arc(PITCH_WIDTH - MARGIN, centerY, 180, 0.5 * Math.PI, 1.5 * Math.PI);
       ctx.stroke();
 
-      // Midfield spot
       ctx.beginPath();
       ctx.arc(PITCH_WIDTH - MARGIN, centerY, 5, 0, 2 * Math.PI);
       ctx.fill();
 
-      // Corners (left side only)
       ctx.beginPath(); ctx.arc(MARGIN, MARGIN, 25, 0, 0.5 * Math.PI); ctx.stroke();
       ctx.beginPath(); ctx.arc(MARGIN, PITCH_HEIGHT - MARGIN, 25, 1.5 * Math.PI, 2 * Math.PI); ctx.stroke();
 
-      // Goal
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 3;
       ctx.strokeRect(MARGIN - 40, centerY - 50, 40, 100);
 
-      // Goal net
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
@@ -893,6 +932,15 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
+    ctx.clearRect(0, 0, PITCH_WIDTH, PITCH_HEIGHT);
+
+    // Apply translation for presentation laser/dragging zoom
+    ctx.save();
+    if (isPresentationMode) {
+      ctx.translate(panOffset.x, panOffset.y);
+      ctx.scale(zoomScale, zoomScale);
+    }
+
     // 1. Draw Field
     drawPitch(ctx);
 
@@ -900,7 +948,9 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
     drawings.forEach(item => {
       ctx.strokeStyle = item.color;
       ctx.fillStyle = item.color;
-      ctx.lineWidth = item.thickness;
+      if (item.type !== 'text') {
+        ctx.lineWidth = item.thickness;
+      }
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
 
@@ -947,6 +997,21 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
         ctx.beginPath();
         ctx.arc(item.center.x, item.center.y, item.radius, 0, 2 * Math.PI);
         ctx.stroke();
+      } else if (item.type === 'zone') {
+        // Draw zone overlays with 25% opacity fill
+        ctx.fillStyle = hexToRgba(item.color, 0.25);
+        const w = item.end.x - item.start.x;
+        const h = item.end.y - item.start.y;
+        ctx.fillRect(item.start.x, item.start.y, w, h);
+        ctx.strokeStyle = item.color;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(item.start.x, item.start.y, w, h);
+      } else if (item.type === 'text') {
+        ctx.fillStyle = item.color;
+        ctx.font = 'bold 20px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(item.text, item.position.x, item.position.y);
       }
     });
 
@@ -954,7 +1019,9 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
     if (activeDrawing) {
       ctx.strokeStyle = activeDrawing.color;
       ctx.fillStyle = activeDrawing.color;
-      ctx.lineWidth = activeDrawing.thickness;
+      if (activeDrawing.type !== 'text') {
+        ctx.lineWidth = activeDrawing.thickness;
+      }
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
 
@@ -1001,6 +1068,14 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
         ctx.beginPath();
         ctx.arc(activeDrawing.center.x, activeDrawing.center.y, activeDrawing.radius, 0, 2 * Math.PI);
         ctx.stroke();
+      } else if (activeDrawing.type === 'zone') {
+        ctx.fillStyle = hexToRgba(activeDrawing.color, 0.25);
+        const w = activeDrawing.end.x - activeDrawing.start.x;
+        const h = activeDrawing.end.y - activeDrawing.start.y;
+        ctx.fillRect(activeDrawing.start.x, activeDrawing.start.y, w, h);
+        ctx.strokeStyle = activeDrawing.color;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(activeDrawing.start.x, activeDrawing.start.y, w, h);
       }
     }
 
@@ -1015,7 +1090,6 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
       }
 
       if (item.type === 'cone') {
-        // Orange Cone
         ctx.fillStyle = '#f97316';
         ctx.strokeStyle = '#ffffff';
         ctx.lineWidth = 1.5;
@@ -1027,7 +1101,6 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
         ctx.fill();
         ctx.stroke();
       } else if (item.type === 'goal') {
-        // Small Goal (grey outline facing pitch)
         ctx.fillStyle = 'rgba(100, 116, 139, 0.4)';
         ctx.strokeStyle = '#e2e8f0';
         ctx.lineWidth = 2.5;
@@ -1036,17 +1109,13 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
         ctx.fill();
         ctx.stroke();
         
-        // Nets inside small goal
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
         ctx.lineWidth = 1.0;
         ctx.beginPath();
         ctx.moveTo(item.x - 6, item.y - 12); ctx.lineTo(item.x - 6, item.y + 12);
         ctx.moveTo(item.x + 6, item.y - 12); ctx.lineTo(item.x + 6, item.y + 12);
-        ctx.moveTo(item.x - 18, item.y - 4); ctx.lineTo(item.x + 18, item.y - 4);
-        ctx.moveTo(item.x - 18, item.y + 4); ctx.lineTo(item.x + 18, item.y + 4);
         ctx.stroke();
       } else if (item.type === 'pole') {
-        // Pole (Pica) - red pole, yellow flag
         ctx.strokeStyle = '#ef4444';
         ctx.lineWidth = 3;
         ctx.beginPath();
@@ -1062,7 +1131,6 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
         ctx.closePath();
         ctx.fill();
       } else if (item.type === 'hoop') {
-        // Training Hoop (Aro) - blue hollow circle
         ctx.strokeStyle = '#3b82f6';
         ctx.lineWidth = 3.5;
         ctx.beginPath();
@@ -1071,8 +1139,10 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
       }
     });
 
-    // 5. Draw Players
+    // 5. Draw Players (only if they are NOT docked!)
     players.forEach(pl => {
+      if (pl.docked) return; // Hide docked players from the canvas
+
       const isSelected = draggingItem?.type === 'player' && draggingItem?.id === pl.id;
       const isHighlighted = selectedPlayerId === pl.id;
 
@@ -1086,38 +1156,60 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
       ctx.beginPath();
       ctx.arc(pl.x, pl.y, PLAYER_RADIUS, 0, 2 * Math.PI);
 
-      if (pl.isGK) {
+      if (pl.id === 'referee') {
+        // Special Referee look
+        ctx.fillStyle = '#10b981'; // bright green
+        ctx.fill();
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        ctx.fillStyle = '#000000';
+        ctx.font = 'bold 12px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('ÁRB', pl.x, pl.y);
+      } else if (pl.isGK) {
         ctx.fillStyle = '#fbbf24';
         ctx.fill();
         ctx.strokeStyle = '#1e2937';
         ctx.lineWidth = 3;
         ctx.stroke();
         ctx.fillStyle = '#1e2937';
+        ctx.font = 'bold 16px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(pl.number.toString(), pl.x, pl.y);
       } else {
-        // Color tags override team colors
         if (pl.colorTag) {
           ctx.fillStyle =
             pl.colorTag === 'blue'
               ? '#2563eb'
               : pl.colorTag === 'red'
               ? '#dc2626'
+              : pl.colorTag === 'yellow'
+              ? '#fbbf24'
               : pl.colorTag === 'green'
               ? '#10b981'
-              : '#f97316';
+              : pl.colorTag === 'orange'
+              ? '#f97316'
+              : pl.colorTag === 'purple'
+              ? '#8b5cf6'
+              : pl.colorTag === 'white'
+              ? '#ffffff'
+              : '#000000';
         } else {
           ctx.fillStyle = pl.team === 'home' ? '#2563eb' : '#dc2626';
         }
         ctx.fill();
-        ctx.strokeStyle = '#ffffff';
+        ctx.strokeStyle = pl.colorTag === 'white' ? '#1e2937' : '#ffffff';
         ctx.lineWidth = 3;
         ctx.stroke();
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = pl.colorTag === 'white' ? '#1e2937' : '#ffffff';
+        ctx.font = 'bold 16px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(pl.number.toString(), pl.x, pl.y);
       }
-
-      ctx.font = 'bold 16px Inter, sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(pl.number.toString(), pl.x, pl.y);
     });
 
     // 6. Draw Ball
@@ -1163,9 +1255,27 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
       ctx.lineTo(px2, py2);
     }
     ctx.stroke();
-  }, [players, ball, drawings, activeDrawing, draggingItem, selectedPlayerId, pitchType, equipment]);
 
-  // Redraw hook
+    // 7. Laser Pointer (in presentation mode, drawn outside scale logic for crispness)
+    if (isPresentationMode && laserPos) {
+      ctx.beginPath();
+      ctx.arc(laserPos.x, laserPos.y, 10 / zoomScale, 0, 2 * Math.PI);
+      ctx.fillStyle = '#ef4444';
+      ctx.shadowColor = '#ef4444';
+      ctx.shadowBlur = 12;
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.arc(laserPos.x, laserPos.y, 3 / zoomScale, 0, 2 * Math.PI);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+
+      ctx.shadowBlur = 0;
+    }
+
+    ctx.restore();
+  }, [players, ball, drawings, activeDrawing, draggingItem, selectedPlayerId, pitchType, equipment, isPresentationMode, zoomScale, panOffset, laserPos]);
+
   useEffect(() => {
     drawAll();
   }, [drawAll]);
@@ -1183,8 +1293,27 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
     const x = (e.clientX - rect.left) * scaleX;
     const y = (e.clientY - rect.top) * scaleY;
 
+    // Double click to dock player
+    if (toolMode === 'move' && e.detail === 2) {
+      for (let i = players.length - 1; i >= 0; i--) {
+        const pl = players[i];
+        if (pl.docked) continue;
+        const dist = Math.hypot(x - pl.x, y - pl.y);
+        if (dist <= PLAYER_RADIUS + 10) {
+          setPlayers(prev => prev.map(p => p.id === pl.id ? { ...p, docked: true } : p));
+          setSelectedPlayerId(null);
+          return;
+        }
+      }
+    }
+
+    if (isPresentationMode) {
+      setIsDraggingCanvas(true);
+      dragStartRef.current = { x: e.clientX - panOffset.x, y: e.clientY - panOffset.y };
+      return;
+    }
+
     if (toolMode === 'move') {
-      // 1. Collision with ball
       const distBall = Math.hypot(x - ball.x, y - ball.y);
       if (distBall <= BALL_RADIUS + 12) {
         setDraggingItem({ type: 'ball' });
@@ -1192,9 +1321,9 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
         return;
       }
 
-      // 2. Collision with players
       for (let i = players.length - 1; i >= 0; i--) {
         const pl = players[i];
+        if (pl.docked) continue;
         const dist = Math.hypot(x - pl.x, y - pl.y);
         if (dist <= PLAYER_RADIUS + 10) {
           setDraggingItem({ type: 'player', id: pl.id });
@@ -1203,7 +1332,6 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
         }
       }
 
-      // 3. Collision with equipment (Training mode only)
       if (mode === 'entrenamiento') {
         for (let i = equipment.length - 1; i >= 0; i--) {
           const item = equipment[i];
@@ -1216,10 +1344,8 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
         }
       }
 
-      // Clicking empty space deselects player
       setSelectedPlayerId(null);
     } else {
-      // Drawing Mode
       const pt = { x, y };
       if (toolMode === 'freehand') {
         setActiveDrawing({ type: 'freehand', color: drawingColor, thickness: drawingThickness, points: [pt] });
@@ -1229,6 +1355,13 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
         setActiveDrawing({ type: 'arrow', color: drawingColor, thickness: drawingThickness, start: pt, end: pt });
       } else if (toolMode === 'circle') {
         setActiveDrawing({ type: 'circle', color: drawingColor, thickness: drawingThickness, center: pt, radius: 0 });
+      } else if (toolMode === 'zone') {
+        setActiveDrawing({ type: 'zone', color: drawingColor, thickness: drawingThickness, start: pt, end: pt });
+      } else if (toolMode === 'text') {
+        const textVal = prompt('Introduce el texto a añadir:');
+        if (textVal && textVal.trim()) {
+          setDrawings(prev => [...prev, { type: 'text', color: drawingColor, text: textVal.trim(), position: pt }]);
+        }
       }
     }
   };
@@ -1243,9 +1376,27 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
     const x = (e.clientX - rect.left) * scaleX;
     const y = (e.clientY - rect.top) * scaleY;
 
-    // Constraint positions
     const cx = Math.max(0, Math.min(canvas.width, x));
     const cy = Math.max(0, Math.min(canvas.height, y));
+
+    if (isPresentationMode) {
+      // Map pointer to zoomed pixels
+      const lx = (x - panOffset.x) / zoomScale;
+      const ly = (y - panOffset.y) / zoomScale;
+      setLaserPos({ x: lx, y: ly });
+
+      if (isDraggingCanvas && zoomScale > 1.0) {
+        const newX = e.clientX - dragStartRef.current.x;
+        const newY = e.clientY - dragStartRef.current.y;
+        const maxPanX = (zoomScale - 1) * canvas.width;
+        const maxPanY = (zoomScale - 1) * canvas.height;
+        setPanOffset({
+          x: Math.max(-maxPanX, Math.min(0, newX)),
+          y: Math.max(-maxPanY, Math.min(0, newY))
+        });
+      }
+      return;
+    }
 
     if (toolMode === 'move' && draggingItem) {
       if (draggingItem.type === 'ball') {
@@ -1268,7 +1419,7 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
             points: [...prev.points, { x: cx, y: cy }]
           };
         });
-      } else if (activeDrawing.type === 'line' || activeDrawing.type === 'arrow') {
+      } else if (activeDrawing.type === 'line' || activeDrawing.type === 'arrow' || activeDrawing.type === 'zone') {
         setActiveDrawing(prev => {
           if (!prev) return prev;
           return {
@@ -1295,11 +1446,42 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
       canvas.releasePointerCapture(e.pointerId);
     }
 
+    if (isPresentationMode) {
+      setIsDraggingCanvas(false);
+      return;
+    }
+
     if (toolMode === 'move') {
       setDraggingItem(null);
     } else if (activeDrawing) {
       setDrawings(prev => [...prev, activeDrawing]);
       setActiveDrawing(null);
+    }
+  };
+
+  // Zoom wheel inside presentation mode
+  const handleWheelZoom = (e: React.WheelEvent<HTMLCanvasElement>) => {
+    if (!isPresentationMode) return;
+    e.preventDefault();
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+
+    const zoomStep = 0.15;
+    const isZoomingIn = e.deltaY < 0;
+    const newScale = Math.max(1.0, Math.min(3.5, isZoomingIn ? zoomScale + zoomStep : zoomScale - zoomStep));
+
+    if (newScale !== zoomScale) {
+      const scaleChange = newScale / zoomScale;
+      const newPanX = mouseX - (mouseX - panOffset.x) * scaleChange;
+      const newPanY = mouseY - (mouseY - panOffset.y) * scaleChange;
+
+      setZoomScale(newScale);
+      setPanOffset(newScale === 1.0 ? { x: 0, y: 0 } : { x: newPanX, y: newPanY });
     }
   };
 
@@ -1350,11 +1532,20 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
     }
   };
 
+  // Reset docks position
+  const handleResetLayout = () => {
+    setIsRecording(false);
+    setIsPlaying(false);
+    setPlayers(prev => prev.map(p => ({ ...p, docked: true })));
+    setBall({ x: PITCH_WIDTH / 2, y: PITCH_HEIGHT / 2 });
+    setDrawings([]);
+    setEquipment([]);
+  };
+
   // Export PNG
   const handleExportPNG = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-
     const dataUrl = canvas.toDataURL('image/png');
     const link = document.createElement('a');
     link.download = `pizarra_pro_${mode}_${Date.now()}.png`;
@@ -1365,15 +1556,18 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
   // State Link Sharing
   const handleShare = () => {
     try {
-      // Create serialized state structure
       const stateObj = {
-        players: players.map(pl => ({ id: pl.id, team: pl.team, number: pl.number, isGK: pl.isGK, x: Math.round(pl.x), y: Math.round(pl.y), colorTag: pl.colorTag })),
+        players: players.map(pl => ({ id: pl.id, team: pl.team, number: pl.number, isGK: pl.isGK, x: Math.round(pl.x), y: Math.round(pl.y), colorTag: pl.colorTag, name: pl.name, docked: pl.docked })),
         ball: { x: Math.round(ball.x), y: Math.round(ball.y) },
         drawings: drawings.map(dr => {
           if (dr.type === 'freehand') {
             return { t: 'f', c: dr.color, th: dr.thickness, pts: dr.points.map(pt => [Math.round(pt.x), Math.round(pt.y)]) };
           } else if (dr.type === 'circle') {
             return { t: 'c', c: dr.color, th: dr.thickness, cx: Math.round(dr.center.x), cy: Math.round(dr.center.y), r: Math.round(dr.radius) };
+          } else if (dr.type === 'zone') {
+            return { t: 'z', c: dr.color, th: dr.thickness, sx: Math.round(dr.start.x), sy: Math.round(dr.start.y), ex: Math.round(dr.end.x), ey: Math.round(dr.end.y) };
+          } else if (dr.type === 'text') {
+            return { t: 'x', c: dr.color, txt: dr.text, px: Math.round(dr.position.x), py: Math.round(dr.position.y) };
           } else {
             return { t: dr.type === 'arrow' ? 'a' : 'l', c: dr.color, th: dr.thickness, sx: Math.round(dr.start.x), sy: Math.round(dr.start.y), ex: Math.round(dr.end.x), ey: Math.round(dr.end.y) };
           }
@@ -1383,7 +1577,8 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
       };
       
       const code = btoa(JSON.stringify(stateObj));
-      const url = `${window.location.origin}${window.location.pathname}?state=${encodeURIComponent(code)}&sec=${mode}`;
+      const sectionParam = mode;
+      const url = `${window.location.origin}${window.location.pathname}?state=${encodeURIComponent(code)}&sec=${sectionParam}`;
       navigator.clipboard.writeText(url);
       setShareCopied(true);
       setTimeout(() => setShareCopied(false), 2000);
@@ -1392,7 +1587,6 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
     }
   };
 
-  // Save to Library Trigger
   const handleSaveToLibrary = () => {
     if (!saveName.trim()) return;
     if (onSave) {
@@ -1412,59 +1606,40 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
     }
   };
 
+  // Toggle Presentation Fullscreen Mode
+  const togglePresentationMode = () => {
+    setIsPresentationMode(!isPresentationMode);
+    setZoomScale(1.0);
+    setPanOffset({ x: 0, y: 0 });
+    setLaserPos(null);
+  };
+
+  const localHomePlayers = players.filter(p => p.team === 'home' && p.number <= availablePlayersCount && p.id !== 'referee');
+  const localAwayPlayers = players.filter(p => p.team === 'away' && p.number <= availablePlayersCount);
+  const refereePlayer = players.find(p => p.id === 'referee');
+
   return (
-    <div className="tactical-container">
-      {/* 1. CONTROL PANELS */}
-      <div className="toolbar glassmorphic">
-        {/* Formations & Field Types */}
-        <div className="toolbar-section">
-          {mode === 'entrenamiento' && (
-            <div className="select-wrapper">
-              <span className="select-label">Tipo de Campo</span>
-              <div className="tool-group">
-                <button
-                  onClick={() => handlePitchTypeToggle('full')}
-                  className={`tool-btn ${pitchType === 'full' ? 'active' : ''}`}
-                >
-                  Completo
-                </button>
-                <button
-                  onClick={() => handlePitchTypeToggle('half')}
-                  className={`tool-btn ${pitchType === 'half' ? 'active' : ''}`}
-                >
-                  Medio Campo
-                </button>
-              </div>
-            </div>
-          )}
-
-          {mode !== 'entrenamiento' && (
-            <>
+    <div className={`tactical-editor-viewport ${isPresentationMode ? 'presentation-mode-active' : ''}`}>
+      
+      {/* 1. TOP TOOLBAR & PRESETS CONTROLS */}
+      {!isPresentationMode && (
+        <div className="toolbar glassmorphic flex-wrap gap-4">
+          
+          {/* Formations & Field Types */}
+          <div className="toolbar-section">
+            {mode === 'entrenamiento' ? (
               <div className="select-wrapper">
-                <span className="select-label text-blue">Local (Azul)</span>
-                <select
-                  value={formHome}
-                  onChange={e => handleHomeFormationChange(e.target.value)}
-                  className="custom-select"
-                  disabled={isRecording || isPlaying}
-                >
-                  <option value="4-3-3">4-3-3</option>
-                  <option value="4-4-2">4-4-2</option>
-                  <option value="4-2-3-1">4-2-3-1</option>
-                  <option value="3-5-2">3-5-2</option>
-                  <option value="5-3-2">5-3-2</option>
-                </select>
+                <span className="select-label">Tipo de Campo</span>
+                <div className="tool-group">
+                  <button onClick={() => handlePitchTypeToggle('full')} className={`tool-btn ${pitchType === 'full' ? 'active' : ''}`}>Completo</button>
+                  <button onClick={() => handlePitchTypeToggle('half')} className={`tool-btn ${pitchType === 'half' ? 'active' : ''}`}>Medio Campo</button>
+                </div>
               </div>
-
-              {pitchType === 'full' && (
+            ) : (
+              <>
                 <div className="select-wrapper">
-                  <span className="select-label text-red">Visitante (Rojo)</span>
-                  <select
-                    value={formAway}
-                    onChange={e => handleAwayFormationChange(e.target.value)}
-                    className="custom-select"
-                    disabled={isRecording || isPlaying}
-                  >
+                  <span className="select-label text-blue">Alineación Local</span>
+                  <select value={formHome} onChange={e => handleHomeFormationChange(e.target.value)} className="custom-select" disabled={isRecording || isPlaying}>
                     <option value="4-3-3">4-3-3</option>
                     <option value="4-4-2">4-4-2</option>
                     <option value="4-2-3-1">4-2-3-1</option>
@@ -1472,228 +1647,441 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
                     <option value="5-3-2">5-3-2</option>
                   </select>
                 </div>
-              )}
-            </>
-          )}
+                {pitchType === 'full' && (
+                  <div className="select-wrapper">
+                    <span className="select-label text-red">Alineación Visitante</span>
+                    <select value={formAway} onChange={e => handleAwayFormationChange(e.target.value)} className="custom-select" disabled={isRecording || isPlaying}>
+                      <option value="4-3-3">4-3-3</option>
+                      <option value="4-4-2">4-4-2</option>
+                      <option value="4-2-3-1">4-2-3-1</option>
+                      <option value="3-5-2">3-5-2</option>
+                      <option value="5-3-2">5-3-2</option>
+                    </select>
+                  </div>
+                )}
+              </>
+            )}
 
-          {/* Set Pieces Specific Buttons */}
-          {mode === 'parado' && (
-            <div className="select-wrapper">
-              <span className="select-label">Jugadas Predefinidas</span>
-              <div className="tool-group flex-wrap">
-                <button onClick={() => applySetPiecePreset('corner_right')} className="tool-btn small-btn" title="Córner Derecho">Córner Der.</button>
-                <button onClick={() => applySetPiecePreset('corner_left')} className="tool-btn small-btn" title="Córner Izquierdo">Córner Izq.</button>
-                <button onClick={() => applySetPiecePreset('falta_lateral')} className="tool-btn small-btn" title="Falta Lateral">Falta Lat.</button>
-                <button onClick={() => applySetPiecePreset('falta_frontal')} className="tool-btn small-btn" title="Falta Frontal">Falta Front.</button>
-                <button onClick={() => applySetPiecePreset('penalti')} className="tool-btn small-btn" title="Penalti">Penalti</button>
+            {/* Session Preset Dropdown */}
+            {(mode === 'entrenamiento' || mode === 'tactica') && (
+              <div className="select-wrapper">
+                <span className="select-label">Sesiones Presets</span>
+                <select onChange={e => applySessionPreset(e.target.value)} className="custom-select" defaultValue="">
+                  <option value="" disabled>-- Cargar Preset --</option>
+                  <option value="rondo_4v1">Rondo 4v1</option>
+                  <option value="rondo_6v2">Rondo 6v2</option>
+                  <option value="pressing_alto">Pressing Alto</option>
+                  <option value="transicion_rapida">Transición Rápida</option>
+                  <option value="juego_posicion">Juego Posición</option>
+                  <option value="amplitud">Amplitud (Sidelines)</option>
+                </select>
               </div>
-            </div>
-          )}
-        </div>
-
-        {/* Drawing Tools */}
-        <div className="toolbar-section divider">
-          <div className="tool-group">
-            <button
-              onClick={() => setToolMode('move')}
-              className={`tool-btn ${toolMode === 'move' ? 'active' : ''}`}
-              title="Mover"
-              disabled={isPlaying}
-            >
-              <MousePointer size={18} />
-            </button>
-            <button
-              onClick={() => setToolMode('arrow')}
-              className={`tool-btn ${toolMode === 'arrow' ? 'active' : ''}`}
-              title="Flecha"
-              disabled={isPlaying}
-            >
-              <ArrowUpRight size={18} />
-            </button>
-            <button
-              onClick={() => setToolMode('freehand')}
-              className={`tool-btn ${toolMode === 'freehand' ? 'active' : ''}`}
-              title="Lápiz"
-              disabled={isPlaying}
-            >
-              <Edit2 size={16} />
-            </button>
-            <button
-              onClick={() => setToolMode('line')}
-              className={`tool-btn ${toolMode === 'line' ? 'active' : ''}`}
-              title="Línea Recta"
-              disabled={isPlaying}
-            >
-              <Slash size={16} />
-            </button>
-            <button
-              onClick={() => setToolMode('circle')}
-              className={`tool-btn ${toolMode === 'circle' ? 'active' : ''}`}
-              title="Círculo"
-              disabled={isPlaying}
-            >
-              <Compass size={16} />
-            </button>
-          </div>
-
-          {/* Color & Size select */}
-          {toolMode !== 'move' && (
-            <div className="drawing-props-panel">
-              <div className="color-palette">
-                {['#ffffff', '#fbbf24', '#ef4444', '#3b82f6', '#10b981'].map(color => (
-                  <button
-                    key={color}
-                    onClick={() => setDrawingColor(color)}
-                    className={`color-btn ${drawingColor === color ? 'selected' : ''}`}
-                    style={{ backgroundColor: color }}
-                  />
-                ))}
-                <input
-                  type="color"
-                  value={drawingColor}
-                  onChange={e => setDrawingColor(e.target.value)}
-                  className="color-picker"
-                />
-              </div>
-
-              <div className="thickness-control">
-                <input
-                  type="range"
-                  min="2"
-                  max="12"
-                  step="2"
-                  value={drawingThickness}
-                  onChange={e => setDrawingThickness(parseInt(e.target.value))}
-                  className="custom-range"
-                  title={`Grosor: ${drawingThickness}px`}
-                />
-                <span className="thickness-indicator">{drawingThickness}px</span>
-              </div>
-            </div>
-          )}
-
-          <button
-            onClick={() => setDrawings([])}
-            className="tool-btn danger"
-            title="Limpiar dibujos"
-            disabled={isPlaying}
-          >
-            <Trash2 size={16} />
-          </button>
-        </div>
-
-        {/* Rec, Reset, PNG, Save & Share */}
-        <div className="toolbar-section divider">
-          <div className="rec-group">
-            <button
-              onClick={handleRecordToggle}
-              className={`rec-btn ${isRecording ? 'recording' : ''}`}
-              title={isRecording ? 'Parar' : 'Grabar'}
-              disabled={isPlaying}
-            >
-              <Video size={16} className={isRecording ? 'pulse' : ''} />
-              <span>{isRecording ? 'Grabando' : 'Grabar'}</span>
-            </button>
-
-            <button
-              onClick={handlePlayToggle}
-              className={`play-btn ${isPlaying ? 'playing' : ''}`}
-              disabled={isRecording || recordingFrames.length === 0}
-            >
-              <Play size={16} />
-              <span>{isPlaying ? 'Parar' : 'Play'}</span>
-            </button>
-
-            <button
-              onClick={handleReset}
-              className="tool-btn text-muted"
-              title="Restablecer posiciones"
-            >
-              <RotateCcw size={16} />
-            </button>
-          </div>
-
-          <div className="action-group">
-            <button onClick={handleExportPNG} className="action-btn" title="Descargar PNG">
-              <Download size={16} />
-              <span>PNG</span>
-            </button>
-
-            <button
-              onClick={handleShare}
-              className={`action-btn ${shareCopied ? 'success' : ''}`}
-              title="Copiar enlace Base64"
-            >
-              {shareCopied ? <Check size={16} /> : <Share2 size={16} />}
-              <span>{shareCopied ? '¡Enlace!' : 'Compartir'}</span>
-            </button>
-
-            {onSave && (
-              <button
-                onClick={() => setShowSaveModal(true)}
-                className="action-btn primary-btn"
-                title="Guardar en Biblioteca"
-              >
-                <Plus size={16} />
-                <span>Guardar</span>
-              </button>
             )}
           </div>
-        </div>
-      </div>
 
-      {/* 2. SUB BAR FOR TRAINING ELEMENTS & COLOR TAGGING */}
-      {(mode === 'entrenamiento' || selectedPlayerId) && (
-        <div className="toolbar sub-toolbar glassmorphic">
+          {/* Drawing Tools */}
+          <div className="toolbar-section divider">
+            <div className="tool-group">
+              <button onClick={() => setToolMode('move')} className={`tool-btn ${toolMode === 'move' ? 'active' : ''}`} title="Mover Fichas"><MousePointer size={18} /></button>
+              <button onClick={() => setToolMode('arrow')} className={`tool-btn ${toolMode === 'arrow' ? 'active' : ''}`} title="Flecha"><ArrowUpRight size={18} /></button>
+              <button onClick={() => setToolMode('freehand')} className={`tool-btn ${toolMode === 'freehand' ? 'active' : ''}`} title="Lápiz"><Edit2 size={16} /></button>
+              <button onClick={() => setToolMode('line')} className={`tool-btn ${toolMode === 'line' ? 'active' : ''}`} title="Línea Recta"><Slash size={16} /></button>
+              <button onClick={() => setToolMode('circle')} className={`tool-btn ${toolMode === 'circle' ? 'active' : ''}`} title="Círculo"><Compass size={16} /></button>
+              <button onClick={() => setToolMode('zone')} className={`tool-btn ${toolMode === 'zone' ? 'active' : ''}`} title="Dibujar Zonas"><Grid size={16} /></button>
+              <button onClick={() => setToolMode('text')} className={`tool-btn ${toolMode === 'text' ? 'active' : ''}`} title="Añadir Texto"><Type size={16} /></button>
+            </div>
+
+            {toolMode !== 'move' && (
+              <div className="drawing-props-panel">
+                <div className="color-palette">
+                  {['#ffffff', '#fbbf24', '#ef4444', '#3b82f6', '#10b981'].map(color => (
+                    <button key={color} onClick={() => setDrawingColor(color)} className={`color-btn ${drawingColor === color ? 'selected' : ''}`} style={{ backgroundColor: color }} />
+                  ))}
+                  <input type="color" value={drawingColor} onChange={e => setDrawingColor(e.target.value)} className="color-picker" />
+                </div>
+                <div className="thickness-control">
+                  <input type="range" min="2" max="12" step="2" value={drawingThickness} onChange={e => setDrawingThickness(parseInt(e.target.value))} className="custom-range" />
+                  <span className="thickness-indicator">{drawingThickness}px</span>
+                </div>
+              </div>
+            )}
+            
+            <button onClick={() => setDrawings([])} className="tool-btn danger" title="Limpiar dibujos"><Trash2 size={16} /></button>
+          </div>
+
+          {/* Action Tools */}
+          <div className="toolbar-section divider">
+            <div className="rec-group">
+              <button onClick={handleRecordToggle} className={`rec-btn ${isRecording ? 'recording' : ''}`} title="Grabar Jugada" disabled={isPlaying}>
+                <Video size={16} className={isRecording ? 'pulse' : ''} />
+                <span>{isRecording ? 'Grabando' : 'Grabar'}</span>
+              </button>
+              <button onClick={handlePlayToggle} className={`play-btn ${isPlaying ? 'playing' : ''}`} disabled={isRecording || recordingFrames.length === 0}>
+                <Play size={16} />
+                <span>{isPlaying ? 'Parar' : 'Play'}</span>
+              </button>
+              <button onClick={handleReset} className="tool-btn text-muted" title="Restablecer Pizarra"><RotateCcw size={16} /></button>
+              <button onClick={handleResetLayout} className="tool-btn danger-border text-red font-semibold" title="Resetear Layout a Docks">Reset Layout</button>
+            </div>
+
+            <div className="action-group">
+              <button onClick={handleExportPNG} className="action-btn" title="Descargar PNG"><Download size={16} /><span>PNG</span></button>
+              <button onClick={handleShare} className={`action-btn ${shareCopied ? 'success' : ''}`} title="Compartir enlace Base64">{shareCopied ? <Check size={16} /> : <Share2 size={16} />}<span>Compartir</span></button>
+              {onSave && <button onClick={() => setShowSaveModal(true)} className="action-btn primary-btn"><Plus size={16} /><span>Guardar</span></button>}
+              <button onClick={togglePresentationMode} className="action-btn flex-center gap-1 font-semibold" style={{ background: '#7c3aed', color: '#fff', borderColor: '#7c3aed' }}>
+                <Monitor size={16} />
+                <span>Presentar</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 2. SUB BAR FOR PRESETS/TIMER IN TRAINING MODE */}
+      {!isPresentationMode && (mode === 'entrenamiento' || selectedPlayerId) && (
+        <div className="toolbar sub-toolbar glassmorphic flex-wrap gap-4 mt-2">
           {mode === 'entrenamiento' && (
             <div className="toolbar-section">
-              <span className="select-label">Accesorios de Entrenamiento:</span>
+              {/* Spawn Tools */}
+              <span className="select-label">Accesorios:</span>
               <div className="tool-group">
-                <button onClick={() => addEquipmentItem('cone')} className="tool-btn item-spawn-btn orange-border">
-                  <span className="cone-dot orange-bg" /> Cono
-                </button>
-                <button onClick={() => addEquipmentItem('goal')} className="tool-btn item-spawn-btn grey-border">
-                  <span className="goal-dot grey-bg" /> Mini Portería
-                </button>
-                <button onClick={() => addEquipmentItem('pole')} className="tool-btn item-spawn-btn red-border">
-                  <span className="pole-dot red-bg" /> Pica
-                </button>
-                <button onClick={() => addEquipmentItem('hoop')} className="tool-btn item-spawn-btn blue-border">
-                  <span className="hoop-dot blue-bg" /> Aro
-                </button>
+                <button onClick={() => addEquipmentItem('cone')} className="tool-btn item-spawn-btn orange-border"><span className="cone-dot orange-bg" /> Cono</button>
+                <button onClick={() => addEquipmentItem('goal')} className="tool-btn item-spawn-btn grey-border"><span className="goal-dot grey-bg" /> Mini Portería</button>
+                <button onClick={() => addEquipmentItem('pole')} className="tool-btn item-spawn-btn red-border"><span className="pole-dot red-bg" /> Pica</button>
+                <button onClick={() => addEquipmentItem('hoop')} className="tool-btn item-spawn-btn blue-border"><span className="hoop-dot blue-bg" /> Aro</button>
+              </div>
+
+              {/* Dynamic squad count selector */}
+              <div className="select-wrapper divider-left pl-4">
+                <span className="select-label">Jugadores por Grupo (3-11)</span>
+                <input
+                  type="number"
+                  min="3"
+                  max="11"
+                  value={availablePlayersCount}
+                  onChange={e => setAvailablePlayersCount(Math.max(3, Math.min(11, parseInt(e.target.value) || 11)))}
+                  className="modal-input"
+                  style={{ width: 60, height: 32, padding: '0.25rem 0.5rem' }}
+                />
+              </div>
+
+              {/* Countdown timer configuration */}
+              <div className="select-wrapper divider-left pl-4 flex-row gap-2 items-end">
+                <div className="flex-col">
+                  <span className="select-label">Series</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="10"
+                    value={timerSeries}
+                    onChange={e => setTimerSeries(Math.max(1, parseInt(e.target.value) || 1))}
+                    className="modal-input"
+                    style={{ width: 50, height: 32, padding: '0.25rem' }}
+                  />
+                </div>
+                <div className="flex-col">
+                  <span className="select-label">Duración</span>
+                  <select
+                    value={timerDuration}
+                    onChange={e => {
+                      const val = parseInt(e.target.value);
+                      setTimerDuration(val);
+                      setTimeLeft(val);
+                    }}
+                    className="custom-select"
+                    style={{ height: 32, minWidth: 80 }}
+                  >
+                    <option value="60">1 Min</option>
+                    <option value="180">3 Min</option>
+                    <option value="300">5 Min</option>
+                    <option value="600">10 Min</option>
+                    <option value="900">15 Min</option>
+                  </select>
+                </div>
               </div>
             </div>
           )}
 
+          {/* Expanded color palette tags for players */}
           {selectedPlayerId && (
             <div className="toolbar-section ml-auto">
-              <span className="select-label">Etiquetar Jugador Seleccionado:</span>
-              <div className="tool-group">
-                <button onClick={() => setPlayerColorTag('blue')} className="color-tag-btn tag-blue" title="Grupo Azul" />
-                <button onClick={() => setPlayerColorTag('red')} className="color-tag-btn tag-red" title="Grupo Rojo" />
-                <button onClick={() => setPlayerColorTag('green')} className="color-tag-btn tag-green" title="Grupo Verde" />
-                <button onClick={() => setPlayerColorTag('orange')} className="color-tag-btn tag-orange" title="Grupo Naranja" />
-                <button onClick={() => setPlayerColorTag(undefined)} className="color-tag-btn tag-clear" title="Quitar Etiqueta" style={{ backgroundColor: '#2d3748' }}>✕</button>
+              <span className="select-label">Color Ficha:</span>
+              <div className="tool-group flex-wrap">
+                {['blue', 'red', 'yellow', 'green', 'orange', 'purple', 'white', 'black'].map(tagColor => (
+                  <button
+                    key={tagColor}
+                    onClick={() => setPlayerColorTag(tagColor as any)}
+                    className="color-tag-btn"
+                    style={{
+                      backgroundColor:
+                        tagColor === 'blue'
+                          ? '#2563eb'
+                          : tagColor === 'red'
+                          ? '#dc2626'
+                          : tagColor === 'yellow'
+                          ? '#fbbf24'
+                          : tagColor === 'green'
+                          ? '#10b981'
+                          : tagColor === 'orange'
+                          ? '#f97316'
+                          : tagColor === 'purple'
+                          ? '#8b5cf6'
+                          : tagColor === 'white'
+                          ? '#ffffff'
+                          : '#000000',
+                      border: '1px solid rgba(255,255,255,0.2)'
+                    }}
+                    title={tagColor.toUpperCase()}
+                  />
+                ))}
+                <button onClick={() => setPlayerColorTag(undefined)} className="color-tag-btn tag-clear" title="Restablecer" style={{ backgroundColor: '#2d3748' }}>✕</button>
               </div>
             </div>
           )}
         </div>
       )}
 
-      {/* 3. CANVAS WRAPPER */}
-      <div className="canvas-wrapper glassmorphic">
-        <canvas
-          ref={canvasRef}
-          width={PITCH_WIDTH}
-          height={PITCH_HEIGHT}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          className="pitch-canvas"
-        />
+      {/* 3. THREE-COLUMN EDITOR STAGE */}
+      <div className={`tactical-editor-stage ${isPresentationMode ? 'presentation-fullscreen' : ''}`}>
+        
+        {/* LEFT DOCK: HOME TEAM */}
+        {!isPresentationMode && (
+          <aside className="dock-sidebar glassmorphic home-dock">
+            <h4 className="dock-title text-blue">Fichas Local</h4>
+            <div className="dock-list scrollbar-custom">
+              {localHomePlayers.map(p => (
+                <div
+                  key={p.id}
+                  draggable={p.docked}
+                  onDragStart={e => handleDockDragStart(e, p.id)}
+                  className={`dock-item-card ${!p.docked ? 'deployed-opacity' : ''}`}
+                >
+                  <div
+                    className="dock-item-token"
+                    style={{
+                      backgroundColor: p.isGK
+                        ? '#fbbf24'
+                        : p.colorTag
+                        ? p.colorTag === 'blue' ? '#2563eb' : p.colorTag === 'red' ? '#dc2626' : p.colorTag === 'yellow' ? '#fbbf24' : p.colorTag === 'green' ? '#10b981' : p.colorTag === 'orange' ? '#f97316' : p.colorTag === 'purple' ? '#8b5cf6' : p.colorTag === 'white' ? '#ffffff' : '#000000'
+                        : '#2563eb',
+                      color: p.isGK || p.colorTag === 'white' ? '#1e2937' : '#ffffff',
+                      borderColor: p.colorTag === 'white' ? '#1e2937' : '#ffffff'
+                    }}
+                  >
+                    {p.number}
+                  </div>
+                  <div className="dock-item-details">
+                    {editingPlayerId === p.id ? (
+                      <input
+                        type="text"
+                        value={editingName}
+                        onChange={e => setEditingName(e.target.value)}
+                        onBlur={savePlayerName}
+                        onKeyDown={e => { if (e.key === 'Enter') savePlayerName(); }}
+                        autoFocus
+                        className="dock-name-input"
+                      />
+                    ) : (
+                      <span onDoubleClick={e => startEditPlayerName(p.id, p.name, e)} className="dock-item-name" title="Doble clic para renombrar">
+                        {p.name}
+                      </span>
+                    )}
+                    <span className="dock-item-status text-muted">
+                      {p.docked ? 'En Banquillo' : 'En Campo'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+
+              {/* Referee Entity at bottom of Home dock */}
+              {refereePlayer && (
+                <div
+                  draggable={refereePlayer.docked}
+                  onDragStart={e => handleDockDragStart(e, refereePlayer.id)}
+                  className={`dock-item-card referee-card ${!refereePlayer.docked ? 'deployed-opacity' : ''}`}
+                >
+                  <div className="dock-item-token" style={{ backgroundColor: '#10b981', color: '#000000', borderColor: '#000000' }}>
+                    ÁRB
+                  </div>
+                  <div className="dock-item-details">
+                    <span className="dock-item-name font-semibold">{refereePlayer.name}</span>
+                    <span className="dock-item-status text-muted">{refereePlayer.docked ? 'En Banquillo' : 'En Campo'}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </aside>
+        )}
+
+        {/* CENTER COLUMN: CANVAS FIELD & TIMERS */}
+        <div className="canvas-viewport-column flex-col items-center">
+          
+          {/* TIMER HUD OVERLAY */}
+          {mode === 'entrenamiento' && !isPresentationMode && (
+            <div className="timer-hud glassmorphic flex-center gap-4">
+              <div className="hud-badge text-yellow">
+                SERIE {currentSerie} / {timerSeries}
+              </div>
+              <div className="hud-timer font-mono text-xl font-bold">
+                {formatTime(timeLeft)}
+              </div>
+              <div className="hud-actions flex-center gap-2">
+                <button
+                  onClick={() => setTimerRunning(!timerRunning)}
+                  className={`action-btn flex-center p-2 rounded-full ${timerRunning ? 'success' : ''}`}
+                  style={{ height: 32, width: 32 }}
+                  title={timerRunning ? 'Pausar' : 'Iniciar'}
+                >
+                  {timerRunning ? <EyeOff size={16} /> : <Play size={16} fill="currentColor" />}
+                </button>
+                <button
+                  onClick={() => {
+                    setTimerRunning(false);
+                    setTimeLeft(timerDuration);
+                  }}
+                  className="tool-btn flex-center p-2 rounded-full"
+                  style={{ height: 32, width: 32 }}
+                  title="Reiniciar Cronómetro"
+                >
+                  <RotateCcw size={14} />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Description overlay */}
+          {mode === 'entrenamiento' && !isPresentationMode && (
+            <div className="exercise-desc-wrapper glassmorphic w-full mb-2 p-2">
+              <span className="select-label">Descripción del Ejercicio:</span>
+              <textarea
+                value={exerciseDesc}
+                onChange={e => setExerciseDesc(e.target.value)}
+                placeholder="Describe los objetivos, repeticiones y reglas del ejercicio..."
+                className="exercise-textarea modal-input mt-1"
+                rows={2}
+              />
+            </div>
+          )}
+
+          {/* PRESENTATION EXIT BUTTON */}
+          {isPresentationMode && (
+            <div className="pres-fullscreen-navbar glassmorphic">
+              <div className="pres-fullscreen-info flex-col">
+                <span className="pres-fullscreen-title">{activePlay ? activePlay.name : 'Modo Presentación'}</span>
+                {savedPlaysList.length > 0 && (
+                  <span className="text-muted text-xs">Jugada {currentPlayIndex + 1} de {savedPlaysList.length} (Usa flechas Izq/Der para cambiar)</span>
+                )}
+              </div>
+              
+              <div className="flex-center gap-4">
+                <span className="text-muted text-sm select-none">
+                  Zoom: {Math.round(zoomScale * 100)}% (Usa rueda ratón para ampliar)
+                </span>
+                {zoomScale > 1.0 && (
+                  <button
+                    onClick={() => {
+                      setZoomScale(1.0);
+                      setPanOffset({ x: 0, y: 0 });
+                    }}
+                    className="action-btn flex-center gap-1 danger-border text-red small-btn"
+                  >
+                    Restablecer
+                  </button>
+                )}
+                <button onClick={togglePresentationMode} className="action-btn flex-center gap-1 primary-btn">
+                  <Maximize size={16} />
+                  <span>Salir</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Main canvas container */}
+          <div className="canvas-wrapper pres-fullscreen-stage glassmorphic w-full">
+            <canvas
+              ref={canvasRef}
+              width={PITCH_WIDTH}
+              height={PITCH_HEIGHT}
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onWheel={handleWheelZoom}
+              onDragOver={handleCanvasDragOver}
+              onDrop={handleCanvasDrop}
+              className="pitch-canvas"
+            />
+          </div>
+        </div>
+
+        {/* RIGHT DOCK: AWAY TEAM */}
+        {!isPresentationMode && (
+          <aside className="dock-sidebar glassmorphic away-dock">
+            <h4 className="dock-title text-red">Fichas Visitante</h4>
+            <div className="dock-list scrollbar-custom">
+              {localAwayPlayers.map(p => (
+                <div
+                  key={p.id}
+                  draggable={p.docked}
+                  onDragStart={e => handleDockDragStart(e, p.id)}
+                  className={`dock-item-card ${!p.docked ? 'deployed-opacity' : ''}`}
+                >
+                  <div
+                    className="dock-item-token"
+                    style={{
+                      backgroundColor: p.isGK
+                        ? '#fbbf24'
+                        : p.colorTag
+                        ? p.colorTag === 'blue' ? '#2563eb' : p.colorTag === 'red' ? '#dc2626' : p.colorTag === 'yellow' ? '#fbbf24' : p.colorTag === 'green' ? '#10b981' : p.colorTag === 'orange' ? '#f97316' : p.colorTag === 'purple' ? '#8b5cf6' : p.colorTag === 'white' ? '#ffffff' : '#000000'
+                        : '#dc2626',
+                      color: p.isGK || p.colorTag === 'white' ? '#1e2937' : '#ffffff',
+                      borderColor: p.colorTag === 'white' ? '#1e2937' : '#ffffff'
+                    }}
+                  >
+                    {p.number}
+                  </div>
+                  <div className="dock-item-details">
+                    {editingPlayerId === p.id ? (
+                      <input
+                        type="text"
+                        value={editingName}
+                        onChange={e => setEditingName(e.target.value)}
+                        onBlur={savePlayerName}
+                        onKeyDown={e => { if (e.key === 'Enter') savePlayerName(); }}
+                        autoFocus
+                        className="dock-name-input"
+                      />
+                    ) : (
+                      <span onDoubleClick={e => startEditPlayerName(p.id, p.name, e)} className="dock-item-name" title="Doble clic para renombrar">
+                        {p.name}
+                      </span>
+                    )}
+                    <span className="dock-item-status text-muted">
+                      {p.docked ? 'En Banquillo' : 'En Campo'}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </aside>
+        )}
       </div>
 
-      {/* 4. MODAL: SAVE TO LIBRARY */}
+      {/* 4. HELP DESCRIPTION */}
+      {!isPresentationMode && (
+        <div className="footer-info text-muted">
+          {toolMode === 'move' ? (
+            <p>⚽ Modo Mover: Arrastra las fichas desde los banquillos laterales al campo. Haz **doble clic** en una ficha del campo para devolverla al banquillo. **Doble clic** en los nombres del banquillo para editarlos.</p>
+          ) : toolMode === 'zone' ? (
+            <p>🟩 Modo Zonas: Arrastra en diagonal en el campo para crear rectángulos semi-transparentes para marcar zonas tácticas (presión, peligro).</p>
+          ) : toolMode === 'text' ? (
+            <p>🔤 Modo Texto: Haz clic en cualquier lugar del campo para escribir anotaciones directas sobre el terreno.</p>
+          ) : (
+            <p>🖌️ Modo Dibujo: Arrastra en la pizarra para pintar flechas, círculos o trazos libres. Usa **Ctrl+Z** para deshacer.</p>
+          )}
+        </div>
+      )}
+
+      {/* MODAL: SAVE PLAY */}
       {showSaveModal && (
         <div className="modal-overlay">
           <div className="modal-card glassmorphic">
@@ -1703,21 +2091,13 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
               type="text"
               value={saveName}
               onChange={e => setSaveName(e.target.value)}
-              placeholder="Ej: Salida de presión 4-3-3"
+              placeholder="Ej: Rondo ofensivo 4v1"
               className="modal-input"
               autoFocus
             />
             <div className="modal-actions">
-              <button onClick={() => setShowSaveModal(false)} className="tool-btn">
-                Cancelar
-              </button>
-              <button
-                onClick={handleSaveToLibrary}
-                className="action-btn primary-btn"
-                disabled={!saveName.trim()}
-              >
-                Confirmar Guardado
-              </button>
+              <button onClick={() => setShowSaveModal(false)} className="tool-btn">Cancelar</button>
+              <button onClick={handleSaveToLibrary} className="action-btn primary-btn" disabled={!saveName.trim()}>Confirmar Guardado</button>
             </div>
           </div>
         </div>
