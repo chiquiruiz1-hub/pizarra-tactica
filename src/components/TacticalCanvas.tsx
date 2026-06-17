@@ -21,7 +21,8 @@ import {
   EyeOff,
   Type,
   Maximize,
-  Grid
+  Grid,
+  RefreshCw
 } from 'lucide-react';
 
 const PITCH_WIDTH = 1200;
@@ -173,9 +174,10 @@ interface TacticalCanvasProps {
     backgroundImage?: string;
   } | null;
   backgroundImage?: string;
+  onClearBackground?: () => void;
 }
 
-export default function TacticalCanvas({ mode, onSave, initialPlayData, backgroundImage }: TacticalCanvasProps) {
+export default function TacticalCanvas({ mode, onSave, initialPlayData, backgroundImage, onClearBackground }: TacticalCanvasProps) {
   // State declaration
   const [pitchType, setPitchType] = useState<'full' | 'half'>('full');
   const [formHome, setFormHome] = useState<string>('4-3-3');
@@ -783,9 +785,9 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
   // Field Drawing Utility
   const drawPitch = (ctx: CanvasRenderingContext2D) => {
     if (bgImage) {
+      ctx.globalAlpha = 0.4;
       ctx.drawImage(bgImage, 0, 0, PITCH_WIDTH, PITCH_HEIGHT);
-      ctx.fillStyle = 'rgba(7, 10, 19, 0.35)';
-      ctx.fillRect(0, 0, PITCH_WIDTH, PITCH_HEIGHT);
+      ctx.globalAlpha = 1.0;
     } else {
       ctx.fillStyle = '#111622'; // Outside margins
       ctx.fillRect(0, 0, PITCH_WIDTH, PITCH_HEIGHT);
@@ -808,7 +810,7 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
     }
 
     if (pitchType === 'full') {
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+      ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 4;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'miter';
@@ -877,7 +879,7 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
       }
       ctx.stroke();
     } else {
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+      ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 4;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'miter';
@@ -1559,6 +1561,18 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
     setEquipment([]);
   };
 
+  const handleRemoveBackground = () => {
+    if (onClearBackground) {
+      onClearBackground();
+    }
+    setBgImage(null);
+    if (initialPlayData) {
+      (initialPlayData as any).backgroundImage = '';
+    }
+  };
+
+  const hasBgImage = !!(backgroundImage || (initialPlayData && (initialPlayData as any).backgroundImage) || bgImage);
+
   // Export PNG
   const handleExportPNG = () => {
     const canvas = canvasRef.current;
@@ -1742,6 +1756,16 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
             </div>
 
             <div className="action-group">
+              {hasBgImage && (
+                <button
+                  onClick={handleRemoveBackground}
+                  className="action-btn danger-border text-red font-semibold flex items-center gap-1"
+                  title="Quitar fondo de vídeo"
+                >
+                  <RefreshCw size={16} />
+                  <span>Quitar fondo</span>
+                </button>
+              )}
               <button onClick={handleExportPNG} className="action-btn" title="Descargar PNG"><Download size={16} /><span>PNG</span></button>
               <button onClick={handleShare} className={`action-btn ${shareCopied ? 'success' : ''}`} title="Compartir enlace Base64">{shareCopied ? <Check size={16} /> : <Share2 size={16} />}<span>Compartir</span></button>
               {onSave && <button onClick={() => setShowSaveModal(true)} className="action-btn primary-btn"><Plus size={16} /><span>Guardar</span></button>}
@@ -2093,6 +2117,7 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
                     return (
                       <div
                         key={pl.id}
+                        className="group"
                         onContextMenu={(e) => {
                           e.preventDefault();
                           setPlayers(prev => prev.map(p => p.id === pl.id ? { ...p, x: 0, y: 0, docked: true } : p));
@@ -2135,6 +2160,18 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
                         >
                           {isReferee ? 'ÁRB' : pl.number}
                         </div>
+
+                        {/* Hover close button */}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPlayers(prev => prev.map(p => p.id === pl.id ? { ...p, x: 0, y: 0, docked: true } : p));
+                            setSelectedPlayerId(null);
+                          }}
+                          className="hidden group-hover:flex absolute -top-1 -right-1 w-4 h-4 bg-red-600 hover:bg-red-700 text-white rounded-full items-center justify-center text-[10px] font-bold border border-white cursor-pointer pointer-events-auto z-40"
+                        >
+                          &times;
+                        </button>
                       </div>
                     );
                   })}

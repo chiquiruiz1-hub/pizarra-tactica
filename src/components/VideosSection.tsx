@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import TacticalCanvas from './TacticalCanvas';
-import { Play, Pause, Camera, Tv, AlertCircle, RefreshCw } from 'lucide-react';
+import { Play, Pause, Camera, Tv, AlertCircle, RefreshCw, Upload } from 'lucide-react';
 
 interface VideosSectionProps {
   onSave?: (name: string, data: any) => void;
@@ -15,8 +15,9 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
   const [videoType, setVideoType] = useState<'youtube' | 'veo' | 'mp4' | 'unknown'>('unknown');
   const [isPlaying, setIsPlaying] = useState(false);
   const [playSpeed, setPlaySpeed] = useState(1);
-  const [canvasBg, setCanvasBg] = useState<string | undefined>(undefined);
+  const [canvasBg, setCanvasBg] = useState<string | null>(null);
   const [captureNotice, setCaptureNotice] = useState<string | null>(null);
+  const [localVideoUrl, setLocalVideoUrl] = useState<string | null>(null);
 
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -73,8 +74,23 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
     }
   }, [initialPlayData]);
 
+  // Clean up Object URL on localVideoUrl state change or component unmount
+  useEffect(() => {
+    return () => {
+      if (localVideoUrl) {
+        URL.revokeObjectURL(localVideoUrl);
+      }
+    };
+  }, [localVideoUrl]);
+
   // Load trigger
   const handleLoadVideo = () => {
+    // Revoke local Object URL if we are loading an external video url
+    if (localVideoUrl) {
+      URL.revokeObjectURL(localVideoUrl);
+      setLocalVideoUrl(null);
+    }
+
     const parsed = parseVideoUrl(videoUrl);
     setLoadedUrl(parsed.url);
     setVideoType(parsed.type);
@@ -84,8 +100,29 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
     
     // Clear canvas background if we load a new video
     if (!initialPlayData || initialPlayData.videoUrl !== videoUrl) {
-      setCanvasBg(undefined);
+      setCanvasBg(null);
     }
+  };
+
+  // Local Video Upload trigger
+  const handleLocalVideoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Revoke previous URL if any
+    if (localVideoUrl) {
+      URL.revokeObjectURL(localVideoUrl);
+    }
+
+    const url = URL.createObjectURL(file);
+    setLocalVideoUrl(url);
+    setLoadedUrl(url);
+    setVideoType('mp4');
+    setVideoUrl(file.name); // Display file name
+    setIsPlaying(false);
+    setPlaySpeed(1);
+    setCaptureNotice(null);
+    setCanvasBg(null);
   };
 
   // Capture frame handler
@@ -96,12 +133,12 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
 
       try {
         const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = 1200;
-        tempCanvas.height = 800;
+        tempCanvas.width = video.videoWidth;
+        tempCanvas.height = video.videoHeight;
         const ctx = tempCanvas.getContext('2d');
         if (ctx) {
-          ctx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
-          const dataUrl = tempCanvas.toDataURL('image/png');
+          ctx.drawImage(video, 0, 0);
+          const dataUrl = tempCanvas.toDataURL('image/jpeg', 0.85);
           setCanvasBg(dataUrl);
           setCaptureNotice('¡Fotograma capturado con éxito como fondo!');
           setTimeout(() => setCaptureNotice(null), 3000);
@@ -166,6 +203,37 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
               <Tv size={16} />
               <span>Cargar</span>
             </button>
+          </div>
+          
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.5rem' }}>
+            <input
+              type="file"
+              accept="video/mp4"
+              id="video-upload"
+              className="hidden"
+              onChange={handleLocalVideoUpload}
+            />
+            <label
+              htmlFor="video-upload"
+              className="action-btn secondary-btn flex-center gap-1 cursor-pointer"
+              style={{
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '0.5rem 1rem',
+                fontSize: '0.85rem',
+                fontWeight: 500,
+                borderRadius: '8px',
+                border: '1px solid var(--border-color)',
+                backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                color: 'var(--text-primary)',
+                transition: 'var(--transition-smooth)'
+              }}
+            >
+              <Upload size={16} />
+              <span>Subir vídeo MP4</span>
+            </label>
           </div>
         </div>
 
@@ -237,7 +305,7 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
               <Tv size={48} className="text-secondary" />
               <div className="text-center">
                 <p style={{ fontWeight: 600 }}>No hay ningún vídeo cargado</p>
-                <p style={{ fontSize: '0.8rem', marginTop: '0.25rem' }}>Pega una URL y haz clic en Cargar para comenzar el análisis.</p>
+                <p style={{ fontSize: '0.8rem', marginTop: '0.25rem' }}>Pega una URL o sube un archivo MP4 para comenzar el análisis.</p>
               </div>
             </div>
           )}
@@ -261,7 +329,7 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
             )}
             {canvasBg && (
               <button
-                onClick={() => setCanvasBg(undefined)}
+                onClick={() => setCanvasBg(null)}
                 className="action-btn text-muted border-dashed"
                 style={{ fontSize: '0.75rem', height: 32 }}
               >
@@ -277,6 +345,30 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
             <span>{captureNotice}</span>
           </div>
         )}
+
+        {/* Instructions Card */}
+        <div 
+          className="instructions-card" 
+          style={{
+            backgroundColor: '#090d16',
+            border: '1px solid rgba(255, 255, 255, 0.05)',
+            borderRadius: '12px',
+            padding: '1.25rem',
+            marginTop: '1rem',
+            boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)'
+          }}
+        >
+          <h3 style={{ fontSize: '0.95rem', fontWeight: 600, color: '#f8fafc', marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <span style={{ color: 'var(--accent-color)' }}>💡</span> Instrucciones de Uso
+          </h3>
+          <ol className="list-decimal pl-5 text-sm space-y-1 text-gray-300">
+            <li>Sube un vídeo MP4 o pega una URL.</li>
+            <li>Reproduce y pausa en el momento que quieres analizar.</li>
+            <li>Pulsa &quot;Capturar Fotograma&quot;.</li>
+            <li>Coloca las fichas sobre los jugadores que ves en el fondo.</li>
+            <li>Guarda la jugada en tu Biblioteca.</li>
+          </ol>
+        </div>
       </div>
 
       {/* RIGHT COLUMN: CANVAS */}
@@ -284,7 +376,8 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
         <TacticalCanvas
           mode="videos"
           onSave={handleSavePlay}
-          backgroundImage={canvasBg}
+          backgroundImage={canvasBg || undefined}
+          onClearBackground={() => setCanvasBg(null)}
           initialPlayData={initialPlayData}
         />
       </div>
