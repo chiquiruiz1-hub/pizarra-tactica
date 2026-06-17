@@ -241,6 +241,10 @@ export default function TacticalCanvas({
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentPlaybackTime, setCurrentPlaybackTime] = useState<number>(0);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(1);
+  const [canvasWidth, setCanvasWidth] = useState(PITCH_WIDTH);
+  const [canvasHeight, setCanvasHeight] = useState(PITCH_HEIGHT);
+  const [isExporting, setIsExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState(0);
   const [initialState, setInitialState] = useState<{
     players: Player[];
     ball: Position;
@@ -291,6 +295,7 @@ export default function TacticalCanvas({
   const playbackAnimRef = useRef<number | null>(null);
   const prevJsonTrackingRef = useRef<any>(null);
   const playbackTimeRef = useRef(0);
+  const canvasTimerTimeRef = useRef<number | null>(null);
   useEffect(() => {
     playbackTimeRef.current = currentPlaybackTime;
   }, [currentPlaybackTime]);
@@ -1234,10 +1239,13 @@ export default function TacticalCanvas({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.clearRect(0, 0, PITCH_WIDTH, PITCH_HEIGHT);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     // Apply translation for presentation laser/dragging zoom
     ctx.save();
+    if (canvas.width !== PITCH_WIDTH || canvas.height !== PITCH_HEIGHT) {
+      ctx.scale(canvas.width / PITCH_WIDTH, canvas.height / PITCH_HEIGHT);
+    }
     if (isPresentationMode) {
       ctx.translate(panOffset.x, panOffset.y);
       ctx.scale(zoomScale, zoomScale);
@@ -1577,8 +1585,39 @@ export default function TacticalCanvas({
       ctx.shadowBlur = 0;
     }
 
+    // 8. Draw Timer Overlay (only when exporting)
+    if (isExporting && canvasTimerTimeRef.current !== null) {
+      const secs = canvasTimerTimeRef.current / 1000;
+      const timeStr = formatProgressTime(secs) + '.' + Math.floor((canvasTimerTimeRef.current % 1000) / 100);
+      
+      ctx.save();
+      ctx.font = 'bold 22px monospace';
+      ctx.fillStyle = 'rgba(17, 22, 34, 0.85)';
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+      ctx.lineWidth = 1;
+      
+      const textWidth = ctx.measureText(timeStr).width;
+      const padding = 12;
+      const boxWidth = textWidth + padding * 2;
+      const boxHeight = 28 + padding;
+      
+      const x = PITCH_WIDTH - boxWidth - 20;
+      const y = 20;
+      
+      ctx.beginPath();
+      ctx.rect(x, y, boxWidth, boxHeight);
+      ctx.fill();
+      ctx.stroke();
+      
+      ctx.fillStyle = '#ffffff';
+      ctx.textBaseline = 'middle';
+      ctx.textAlign = 'left';
+      ctx.fillText(timeStr, x + padding, y + boxHeight / 2);
+      ctx.restore();
+    }
+
     ctx.restore();
-  }, [players, ball, drawings, activeDrawing, draggingItem, selectedPlayerId, pitchType, equipment, isPresentationMode, zoomScale, panOffset, laserPos]);
+  }, [players, ball, drawings, activeDrawing, draggingItem, selectedPlayerId, pitchType, equipment, isPresentationMode, zoomScale, panOffset, laserPos, isExporting]);
 
   useEffect(() => {
     drawAll();
@@ -1992,6 +2031,159 @@ export default function TacticalCanvas({
     }
   };
 
+  const handleExportVideo = () => {
+    if (recordingFrames.length === 0 || isRecording || isPlaying || isExporting) return;
+    setToolMode('move');
+    setCanvasWidth(1280);
+    setCanvasHeight(853);
+    setIsExporting(true);
+    setExportProgress(0);
+  };
+
+  // Start export recording after canvas resize has been applied by React
+  useEffect(() => {
+    if (isExporting && canvasWidth === 1280) {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      // Capture canvas stream at 30fps
+      const stream = canvas.captureStream(30);
+
+      // Setup MediaRecorder
+      let options = { mimeType: 'video/webm;codecs=vp9' };
+      if (typeof MediaRecorder !== 'undefined') {
+        if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+          options = { mimeType: 'video/webm;codecs=vp8' };
+          if (!MediaRecorder.isTypeSupported(options.mimeType)) {
+            options = { mimeType: 'video/webm' };
+          }
+        }
+      }
+
+      const mediaRecorder = new MediaRecorder(stream, options);
+      const chunks: Blob[] = [];
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          chunks.push(e.data);
+        }
+      };
+
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(chunks, { type: 'video/webm' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'pizarrapro_jugada.webm';
+        a.click();
+        URL.revokeObjectURL(url);
+        setIsExporting(false);
+        setExportProgress(0);
+        canvasTimerTimeRef.current = null;
+        setCanvasWidth(PITCH_WIDTH);
+        setCanvasHeight(PITCH_HEIGHT);
+      };
+
+      mediaRecorder.start();
+
+      // Playback loop
+      const lastFrame = recordingFrames[recordingFrames.length - 1];
+      const duration = lastFrame.timestamp;
+      const startPerf = performance.now();
+
+      const animateExport = () => {
+        const elapsed = performance.now() - startPerf;
+
+        if (elapsed >= duration) {
+          canvasTimerTimeRef.current = duration;
+          // Apply final frame positions
+          setPlayers(prev =>
+            prev.map(p => {
+              const pf = lastFrame.players.find(x => x.id === p.id);
+              if (pf) {
+                const tagColor = pf.colorTag as any;
+                return { ...p, x: pf.x, y: pf.y, colorTag: tagColor, docked: pf.docked, name: pf.name };
+              }
+              return p;
+            })
+          );
+          setBall({ ...lastFrame.ball });
+          if (lastFrame.equipment) {
+            setEquipment(lastFrame.equipment.map(e => ({ ...e })));
+          }
+          
+          setTimeout(() => {
+            mediaRecorder.stop();
+          }, 150);
+        } else {
+          canvasTimerTimeRef.current = elapsed;
+          
+          let f1 = recordingFrames[0];
+          let f2 = recordingFrames[recordingFrames.length - 1];
+
+          for (let i = 0; i < recordingFrames.length - 1; i++) {
+            if (recordingFrames[i].timestamp <= elapsed && recordingFrames[i + 1].timestamp >= elapsed) {
+              f1 = recordingFrames[i];
+              f2 = recordingFrames[i + 1];
+              break;
+            }
+          }
+
+          const timeDiff = f2.timestamp - f1.timestamp;
+          const ratio = timeDiff === 0 ? 0 : (elapsed - f1.timestamp) / timeDiff;
+
+          setPlayers(prev =>
+            prev.map(p => {
+              const p1 = f1.players.find(x => x.id === p.id);
+              const p2 = f2.players.find(x => x.id === p.id);
+              if (p1 && p2) {
+                const tagColor = p2.colorTag as any;
+                return {
+                  ...p,
+                  x: p1.x + (p2.x - p1.x) * ratio,
+                  y: p1.y + (p2.y - p1.y) * ratio,
+                  colorTag: tagColor,
+                  docked: p2.docked,
+                  name: p2.name
+                };
+              }
+              return p;
+            })
+          );
+
+          setBall({
+            x: f1.ball.x + (f2.ball.x - f1.ball.x) * ratio,
+            y: f1.ball.y + (f2.ball.y - f1.ball.y) * ratio
+          });
+
+          if (f1.equipment && f2.equipment) {
+            setEquipment(prev =>
+              prev.map(eq => {
+                const eq1 = f1.equipment?.find(x => x.id === eq.id);
+                const eq2 = f2.equipment?.find(x => x.id === eq.id);
+                if (eq1 && eq2) {
+                  return {
+                    ...eq,
+                    x: eq1.x + (eq2.x - eq1.x) * ratio,
+                    y: eq1.y + (eq2.y - eq1.y) * ratio
+                  };
+                }
+                return eq;
+              })
+            );
+          }
+
+          const progress = Math.min(100, (elapsed / duration) * 100);
+          setExportProgress(Math.round(progress));
+
+          requestAnimationFrame(animateExport);
+        }
+      };
+
+      requestAnimationFrame(animateExport);
+    }
+  }, [isExporting, canvasWidth]);
+
   const handleReset = () => {
     setIsRecording(false);
     setIsPlaying(false);
@@ -2252,6 +2444,21 @@ export default function TacticalCanvas({
                 </button>
               )}
               <button onClick={handleExportPNG} className="action-btn" title="Descargar PNG"><Download size={16} /><span>PNG</span></button>
+              {recordingFrames.length > 0 && (
+                <button
+                  onClick={handleExportVideo}
+                  className="action-btn"
+                  title="Exportar como vídeo WebM"
+                  disabled={isExporting}
+                  style={{
+                    opacity: isExporting ? 0.6 : 1,
+                    cursor: isExporting ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  <Video size={16} />
+                  <span>{isExporting ? 'Exportando...' : 'Exportar vídeo'}</span>
+                </button>
+              )}
               <button onClick={handleShare} className={`action-btn ${shareCopied ? 'success' : ''}`} title="Compartir enlace Base64">{shareCopied ? <Check size={16} /> : <Share2 size={16} />}<span>Compartir</span></button>
               {onSave && <button onClick={() => setShowSaveModal(true)} className="action-btn primary-btn"><Plus size={16} /><span>Guardar</span></button>}
               <button onClick={togglePresentationMode} className="action-btn flex-center gap-1 font-semibold" style={{ background: '#7c3aed', color: '#fff', borderColor: '#7c3aed' }}>
@@ -2552,7 +2759,7 @@ export default function TacticalCanvas({
               style={{
                 position: 'relative',
                 maxWidth: '100%',
-                width: `${PITCH_WIDTH}px`,
+                width: `${canvasWidth}px`,
                 aspectRatio: `${PITCH_WIDTH} / ${PITCH_HEIGHT}`
               }}
               onPointerDown={handlePointerDown}
@@ -2560,10 +2767,58 @@ export default function TacticalCanvas({
               onPointerUp={handlePointerUp}
               onWheel={handleWheelZoom}
             >
+              {/* Video Exporting Progress Overlay */}
+              {isExporting && (
+                <div
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '100%',
+                    backgroundColor: 'rgba(11, 15, 26, 0.85)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 100,
+                    borderRadius: '8px'
+                  }}
+                >
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem', maxWidth: '300px', width: '80%' }}>
+                    <span style={{ fontSize: '1rem', fontWeight: 600, color: '#f8fafc', fontFamily: 'Inter, sans-serif' }}>
+                      Exportando vídeo... {exportProgress}%
+                    </span>
+                    <div
+                      style={{
+                        width: '100%',
+                        height: '8px',
+                        backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                        borderRadius: '4px',
+                        overflow: 'hidden'
+                      }}
+                    >
+                      <div
+                        style={{
+                          height: '100%',
+                          width: `${exportProgress}%`,
+                          backgroundColor: '#3b82f6',
+                          borderRadius: '4px',
+                          transition: 'width 0.1s ease-out'
+                        }}
+                      />
+                    </div>
+                    <span style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.25rem', textAlign: 'center', fontFamily: 'Inter, sans-serif' }}>
+                      Por favor, no cierres esta pestaña.
+                    </span>
+                  </div>
+                </div>
+              )}
+
               <canvas
                 ref={canvasRef}
-                width={PITCH_WIDTH}
-                height={PITCH_HEIGHT}
+                width={canvasWidth}
+                height={canvasHeight}
                 onDragOver={handleCanvasDragOver}
                 onDrop={handleCanvasDrop}
                 className="pitch-canvas"
