@@ -1454,6 +1454,21 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
     }
 
     if (toolMode === 'move') {
+      if (draggingItem && draggingItem.type === 'player' && draggingItem.id) {
+        if (canvas) {
+          const rect = canvas.getBoundingClientRect();
+          const scaleX = canvas.width / rect.width;
+          const x = (e.clientX - rect.left) * scaleX;
+          
+          // If dropped outside the left/right boundaries of the canvas
+          if (x < 0 || x > PITCH_WIDTH) {
+            setPlayers(prev =>
+              prev.map(p => (p.id === draggingItem.id ? { ...p, x: 0, y: 0, docked: true } : p))
+            );
+            setSelectedPlayerId(null);
+          }
+        }
+      }
       setDraggingItem(null);
     } else if (activeDrawing) {
       setDrawings(prev => [...prev, activeDrawing]);
@@ -2078,7 +2093,6 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
                     return (
                       <div
                         key={pl.id}
-                        className="group"
                         style={{
                           position: 'absolute',
                           left: `${(pl.x / PITCH_WIDTH) * 100}%`,
@@ -2116,37 +2130,6 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
                         >
                           {isReferee ? 'ÁRB' : pl.number}
                         </div>
-
-                        {/* Close button "x" */}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            e.preventDefault();
-                            setPlayers(prev => prev.map(p => p.id === pl.id ? { ...p, x: 0, y: 0, docked: true } : p));
-                            setSelectedPlayerId(null);
-                          }}
-                          onPointerDown={(e) => {
-                            e.stopPropagation();
-                          }}
-                          className="absolute -top-1 -right-1 hidden group-hover:block"
-                          style={{
-                            width: '18px',
-                            height: '18px',
-                            borderRadius: '50%',
-                            backgroundColor: '#ef4444',
-                            color: '#ffffff',
-                            border: '1px solid #ffffff',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontSize: '12px',
-                            lineHeight: 1,
-                            cursor: 'pointer',
-                            zIndex: 40
-                          }}
-                        >
-                          ×
-                        </button>
                       </div>
                     );
                   })}
