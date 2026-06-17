@@ -317,6 +317,14 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
     }
   };
 
+  const handleSeekVideo = (time: number) => {
+    const video = videoRef.current;
+    if (video && videoType === 'mp4') {
+      video.currentTime = time;
+    }
+    setCurrentTime(time);
+  };
+
   // Wrapper for TacticalCanvas save trigger
   const handleSavePlay = (name: string, playData: any) => {
     if (onSave) {
@@ -848,6 +856,7 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
           videoIsPlaying={isPlaying}
           onPlayStateChange={handleWhiteboardPlayChange}
           hasVideo={!!loadedUrl}
+          onSeekVideo={handleSeekVideo}
         />
       </div>
     </div>
