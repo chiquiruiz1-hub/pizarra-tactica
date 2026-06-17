@@ -5,6 +5,7 @@ import DashboardHome from '../components/DashboardHome';
 import TacticalCanvas, { Player, Position, Drawing, EquipmentItem } from '../components/TacticalCanvas';
 import LibraryView from '../components/LibraryView';
 import PresentationView from '../components/PresentationView';
+import VideosSection from '../components/VideosSection';
 import {
   Home,
   Layers,
@@ -14,7 +15,8 @@ import {
   Monitor,
   Menu,
   X,
-  Zap
+  Zap,
+  Tv
 } from 'lucide-react';
 
 export type PlayCategory = 'Táctica' | 'Balón parado' | 'Entrenamiento';
@@ -30,6 +32,8 @@ export interface SavedPlay {
   pitchType: 'full' | 'half';
   equipment: EquipmentItem[];
   thumbnail: string;
+  videoUrl?: string;
+  backgroundImage?: string;
 }
 
 export default function PizarraProApp() {
@@ -44,6 +48,8 @@ export default function PizarraProApp() {
     drawings: Drawing[];
     pitchType: 'full' | 'half';
     equipment: EquipmentItem[];
+    backgroundImage?: string;
+    videoUrl?: string;
   } | null>(null);
 
   // Active play ID for presentation mode
@@ -92,13 +98,15 @@ export default function PizarraProApp() {
           ball: decoded.ball || { x: 600, y: 400 },
           drawings: decodedDrawings,
           pitchType: decoded.pitchType || 'full',
-          equipment: decoded.equipment || []
+          equipment: decoded.equipment || [],
+          backgroundImage: decoded.backgroundImage || '',
+          videoUrl: decoded.videoUrl || ''
         };
 
         setEditorInitialData(loadedPlay);
         
         // Navigate to appropriate section
-        if (secParam === 'tactica' || secParam === 'parado' || secParam === 'entrenamiento') {
+        if (secParam === 'tactica' || secParam === 'parado' || secParam === 'entrenamiento' || secParam === 'videos') {
           setActiveSection(secParam);
         } else {
           setActiveSection('tactica');
@@ -129,7 +137,9 @@ export default function PizarraProApp() {
       drawings: canvasData.drawings,
       pitchType: canvasData.pitchType,
       equipment: canvasData.equipment,
-      thumbnail: canvasData.thumbnail
+      thumbnail: canvasData.thumbnail,
+      videoUrl: canvasData.videoUrl,
+      backgroundImage: canvasData.backgroundImage
     };
 
     const updated = [newPlay, ...plays];
@@ -156,11 +166,15 @@ export default function PizarraProApp() {
       ball: play.ball,
       drawings: play.drawings,
       pitchType: play.pitchType,
-      equipment: play.equipment || []
+      equipment: play.equipment || [],
+      backgroundImage: play.backgroundImage,
+      videoUrl: play.videoUrl
     });
 
     // Determine destination tab
-    if (play.category === 'Táctica') {
+    if (play.videoUrl) {
+      setActiveSection('videos');
+    } else if (play.category === 'Táctica') {
       setActiveSection('tactica');
     } else if (play.category === 'Balón parado') {
       setActiveSection('parado');
@@ -184,6 +198,7 @@ export default function PizarraProApp() {
     { id: 'tactica', label: 'Pizarra Táctica', icon: Layers },
     { id: 'parado', label: 'Balón Parado', icon: Compass },
     { id: 'entrenamiento', label: 'Entrenamiento', icon: Video },
+    { id: 'videos', label: 'Vídeos', icon: Tv },
     { id: 'biblioteca', label: 'Biblioteca', icon: FolderOpen },
     { id: 'presentacion', label: 'Presentación', icon: Monitor }
   ];
@@ -208,7 +223,7 @@ export default function PizarraProApp() {
                   setActiveSection(item.id);
                   setSidebarOpen(false);
                   // Clear editor data when switching tabs (unless going into edit flow)
-                  if (item.id === 'tactica' || item.id === 'parado' || item.id === 'entrenamiento') {
+                  if (item.id === 'tactica' || item.id === 'parado' || item.id === 'entrenamiento' || item.id === 'videos') {
                     setEditorInitialData(null);
                   }
                 }}
@@ -274,6 +289,16 @@ export default function PizarraProApp() {
             <h1 className="viewport-title font-gradient">Sesiones de Entrenamiento</h1>
             <TacticalCanvas
               mode="entrenamiento"
+              onSave={handleSavePlay}
+              initialPlayData={editorInitialData}
+            />
+          </div>
+        )}
+
+        {activeSection === 'videos' && (
+          <div className="view-content fade-in">
+            <h1 className="viewport-title font-gradient">Análisis de Vídeo</h1>
+            <VideosSection
               onSave={handleSavePlay}
               initialPlayData={editorInitialData}
             />

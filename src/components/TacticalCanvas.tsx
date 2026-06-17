@@ -139,18 +139,20 @@ const pctToCanvas = (pctX: number, pctY: number): Position => {
 };
 
 interface TacticalCanvasProps {
-  mode: 'tactica' | 'parado' | 'entrenamiento';
-  onSave?: (name: string, data: { players: Player[]; ball: Position; drawings: Drawing[]; pitchType: 'full' | 'half'; equipment: EquipmentItem[]; thumbnail: string }) => void;
+  mode: 'tactica' | 'parado' | 'entrenamiento' | 'videos';
+  onSave?: (name: string, data: { players: Player[]; ball: Position; drawings: Drawing[]; pitchType: 'full' | 'half'; equipment: EquipmentItem[]; thumbnail: string; backgroundImage?: string }) => void;
   initialPlayData?: {
     players: Player[];
     ball: Position;
     drawings: Drawing[];
     pitchType: 'full' | 'half';
     equipment: EquipmentItem[];
+    backgroundImage?: string;
   } | null;
+  backgroundImage?: string;
 }
 
-export default function TacticalCanvas({ mode, onSave, initialPlayData }: TacticalCanvasProps) {
+export default function TacticalCanvas({ mode, onSave, initialPlayData, backgroundImage }: TacticalCanvasProps) {
   // State declaration
   const [pitchType, setPitchType] = useState<'full' | 'half'>('full');
   const [formHome, setFormHome] = useState<string>('4-3-3');
@@ -184,6 +186,20 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData }: Tactic
   const [shareCopied, setShareCopied] = useState(false);
   const [saveName, setSaveName] = useState('');
   const [showSaveModal, setShowSaveModal] = useState(false);
+
+  // Background Image State
+  const [bgImage, setBgImage] = useState<HTMLImageElement | null>(null);
+
+  useEffect(() => {
+    const bgSrc = backgroundImage || (initialPlayData && (initialPlayData as any).backgroundImage);
+    if (bgSrc) {
+      const img = new Image();
+      img.src = bgSrc;
+      img.onload = () => setBgImage(img);
+    } else {
+      setBgImage(null);
+    }
+  }, [backgroundImage, initialPlayData]);
 
   // Canvas ref
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -703,18 +719,33 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData }: Tactic
 
   // Field Drawing Utility
   const drawPitch = (ctx: CanvasRenderingContext2D) => {
-    ctx.fillStyle = '#111622'; // Outside margins
-    ctx.fillRect(0, 0, PITCH_WIDTH, PITCH_HEIGHT);
+    if (bgImage) {
+      ctx.drawImage(bgImage, 0, 0, PITCH_WIDTH, PITCH_HEIGHT);
+      ctx.fillStyle = 'rgba(7, 10, 19, 0.35)';
+      ctx.fillRect(0, 0, PITCH_WIDTH, PITCH_HEIGHT);
+    } else {
+      ctx.fillStyle = '#111622'; // Outside margins
+      ctx.fillRect(0, 0, PITCH_WIDTH, PITCH_HEIGHT);
+
+      if (pitchType === 'full') {
+        // Grass Stripes
+        const stripesCount = 15;
+        const stripeWidth = PLAY_WIDTH / stripesCount;
+        for (let i = 0; i < stripesCount; i++) {
+          ctx.fillStyle = i % 2 === 0 ? '#1b2d1c' : '#233924';
+          ctx.fillRect(MARGIN + i * stripeWidth, MARGIN, stripeWidth, PLAY_HEIGHT);
+        }
+      } else {
+        const stripesCount = 8;
+        const stripeWidth = PLAY_WIDTH / stripesCount;
+        for (let i = 0; i < stripesCount; i++) {
+          ctx.fillStyle = i % 2 === 0 ? '#1b2d1c' : '#233924';
+          ctx.fillRect(MARGIN + i * stripeWidth, MARGIN, stripeWidth, PLAY_HEIGHT);
+        }
+      }
+    }
 
     if (pitchType === 'full') {
-      // Grass Stripes
-      const stripesCount = 15;
-      const stripeWidth = PLAY_WIDTH / stripesCount;
-      for (let i = 0; i < stripesCount; i++) {
-        ctx.fillStyle = i % 2 === 0 ? '#1b2d1c' : '#233924';
-        ctx.fillRect(MARGIN + i * stripeWidth, MARGIN, stripeWidth, PLAY_HEIGHT);
-      }
-
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
       ctx.lineWidth = 4;
       ctx.lineCap = 'round';
@@ -796,12 +827,6 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData }: Tactic
       ctx.stroke();
     } else {
       // Stretches left-half pitch
-      const stripesCount = 8;
-      const stripeWidth = PLAY_WIDTH / stripesCount;
-      for (let i = 0; i < stripesCount; i++) {
-        ctx.fillStyle = i % 2 === 0 ? '#1b2d1c' : '#233924';
-        ctx.fillRect(MARGIN + i * stripeWidth, MARGIN, stripeWidth, PLAY_HEIGHT);
-      }
 
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
       ctx.lineWidth = 4;
@@ -1379,7 +1404,8 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData }: Tactic
         drawings: drawings.map(d => ({ ...d })),
         pitchType,
         equipment: equipment.map(e => ({ ...e })),
-        thumbnail
+        thumbnail,
+        backgroundImage: backgroundImage || (initialPlayData && initialPlayData.backgroundImage) || ''
       });
       setSaveName('');
       setShowSaveModal(false);

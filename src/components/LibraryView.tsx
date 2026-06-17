@@ -42,11 +42,13 @@ export default function LibraryView({ plays, onEditPlay, onDeletePlay }: Library
           }
         }),
         pitchType: play.pitchType,
-        equipment: (play.equipment || []).map(e => ({ id: e.id, type: e.type, x: Math.round(e.x), y: Math.round(e.y) }))
+        equipment: (play.equipment || []).map(e => ({ id: e.id, type: e.type, x: Math.round(e.x), y: Math.round(e.y) })),
+        videoUrl: play.videoUrl || '',
+        backgroundImage: play.backgroundImage || ''
       };
 
       const code = btoa(JSON.stringify(stateObj));
-      const sectionParam = play.category === 'Táctica' ? 'tactica' : play.category === 'Balón parado' ? 'parado' : 'entrenamiento';
+      const sectionParam = play.videoUrl ? 'videos' : (play.category === 'Táctica' ? 'tactica' : play.category === 'Balón parado' ? 'parado' : 'entrenamiento');
       const url = `${window.location.origin}${window.location.pathname}?state=${encodeURIComponent(code)}&sec=${sectionParam}`;
       
       navigator.clipboard.writeText(url);
@@ -132,13 +134,19 @@ export default function LibraryView({ plays, onEditPlay, onDeletePlay }: Library
                 ) : (
                   <div className="play-thumbnail-placeholder">⚽</div>
                 )}
-                <div className="category-overlay">
+                <div className="category-overlay" style={{ display: 'flex', gap: '0.35rem' }}>
                   <span className={`badge ${play.category === 'Táctica' ? 'badge-blue' : play.category === 'Balón parado' ? 'badge-yellow' : 'badge-orange'}`}>
                     {play.category === 'Táctica' && <Layers size={12} className="inline mr-1" />}
                     {play.category === 'Balón parado' && <Compass size={12} className="inline mr-1" />}
                     {play.category === 'Entrenamiento' && <Video size={12} className="inline mr-1" />}
                     {play.category}
                   </span>
+                  {play.videoUrl && (
+                    <span className="badge badge-red" style={{ display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
+                      <Video size={12} />
+                      Vídeo
+                    </span>
+                  )}
                 </div>
               </div>
 
