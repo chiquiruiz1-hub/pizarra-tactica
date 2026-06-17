@@ -167,7 +167,10 @@ body {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
-  background: linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(15, 20, 34, 0.6) 100%);
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.10) 0%, rgba(15, 20, 34, 0.65) 100%);
+  border-left: 3px solid rgba(16, 185, 129, 0.55);
+  position: relative;
+  overflow: hidden;
 }
 
 .welcome-title {
@@ -231,9 +234,11 @@ body {
 }
 
 .stat-value {
-  font-size: 2rem;
-  font-weight: 700;
+  font-size: 2.2rem;
+  font-weight: 800;
   line-height: 1;
+  letter-spacing: -0.03em;
+  color: #f8fafc;
 }
 
 /* Shortcuts Panel */
@@ -416,6 +421,10 @@ body {
 .empty-recent-state {
   text-align: center;
   padding: 2.5rem 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .stats-indicator-card {
