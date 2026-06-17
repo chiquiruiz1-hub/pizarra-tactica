@@ -1233,11 +1233,19 @@ export default function TacticalCanvas({
   };
 
   // Canvas draw operations
-  const drawAll = useCallback(() => {
+  const drawAll = useCallback((
+    customPlayers?: Player[],
+    customBall?: Position,
+    customEquipment?: any[]
+  ) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+
+    const activePlayers = customPlayers || players;
+    const activeBall = customBall || ball;
+    const activeEquipment = customEquipment || equipment;
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
@@ -1390,7 +1398,7 @@ export default function TacticalCanvas({
     }
 
     // 4. Draw Equipment (cones, small goals, hoops, poles)
-    equipment.forEach(item => {
+    activeEquipment.forEach(item => {
       const isSelected = draggingItem?.type === 'equipment' && draggingItem?.id === item.id;
       if (isSelected) {
         ctx.beginPath();
@@ -1451,7 +1459,7 @@ export default function TacticalCanvas({
 
     // 5. Draw Players (only if they are NOT docked!)
     if (isPresentationMode) {
-      players.forEach(pl => {
+      activePlayers.forEach(pl => {
         if (pl.docked) return; // Hide docked players from the canvas
 
         const isSelected = draggingItem?.type === 'player' && draggingItem?.id === pl.id;
@@ -1522,19 +1530,48 @@ export default function TacticalCanvas({
           ctx.fillText(pl.number.toString(), pl.x, pl.y);
         }
       });
+    } else if (isExporting) {
+      activePlayers.forEach(pl => {
+        if (pl.docked) return;
+        
+        let color = '#2563eb'; // blue
+        if (pl.isGK) {
+          color = '#fbbf24'; // yellow
+        } else if (pl.team === 'away') {
+          color = '#dc2626'; // red
+        } else if (pl.id === 'referee') {
+          color = '#10b981'; // green for referee
+        }
+        
+        ctx.beginPath();
+        ctx.arc(pl.x, pl.y, PLAYER_RADIUS, 0, 2 * Math.PI);
+        ctx.fillStyle = color;
+        ctx.fill();
+        
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 16px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const text = pl.id === 'referee' ? 'ÁRB' : pl.number.toString();
+        ctx.fillText(text, pl.x, pl.y);
+      });
     }
 
     // 6. Draw Ball
     const isBallSelected = draggingItem?.type === 'ball';
     if (isBallSelected) {
       ctx.beginPath();
-      ctx.arc(ball.x, ball.y, BALL_RADIUS + 4, 0, 2 * Math.PI);
+      ctx.arc(activeBall.x, activeBall.y, BALL_RADIUS + 4, 0, 2 * Math.PI);
       ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
       ctx.fill();
     }
 
     ctx.beginPath();
-    ctx.arc(ball.x, ball.y, BALL_RADIUS, 0, 2 * Math.PI);
+    ctx.arc(activeBall.x, activeBall.y, BALL_RADIUS, 0, 2 * Math.PI);
     ctx.fillStyle = '#ffffff';
     ctx.fill();
     ctx.strokeStyle = '#1e2937';
@@ -1546,8 +1583,8 @@ export default function TacticalCanvas({
     const rPent = 4;
     for (let i = 0; i < 5; i++) {
       const angle = (i * 2 * Math.PI) / 5 - Math.PI / 2;
-      const px = ball.x + rPent * Math.cos(angle);
-      const py = ball.y + rPent * Math.sin(angle);
+      const px = activeBall.x + rPent * Math.cos(angle);
+      const py = activeBall.y + rPent * Math.sin(angle);
       if (i === 0) ctx.moveTo(px, py);
       else ctx.lineTo(px, py);
     }
@@ -1559,10 +1596,10 @@ export default function TacticalCanvas({
     ctx.lineWidth = 1.5;
     for (let i = 0; i < 5; i++) {
       const angle = (i * 2 * Math.PI) / 5 - Math.PI / 2;
-      const px1 = ball.x + rPent * Math.cos(angle);
-      const py1 = ball.y + rPent * Math.sin(angle);
-      const px2 = ball.x + BALL_RADIUS * Math.cos(angle);
-      const py2 = ball.y + BALL_RADIUS * Math.sin(angle);
+      const px1 = activeBall.x + rPent * Math.cos(angle);
+      const py1 = activeBall.y + rPent * Math.sin(angle);
+      const px2 = activeBall.x + BALL_RADIUS * Math.cos(angle);
+      const py2 = activeBall.y + BALL_RADIUS * Math.sin(angle);
       ctx.moveTo(px1, py1);
       ctx.lineTo(px2, py2);
     }
@@ -2097,19 +2134,75 @@ export default function TacticalCanvas({
         if (elapsed >= duration) {
           canvasTimerTimeRef.current = duration;
           // Apply final frame positions
-          setPlayers(prev =>
-            prev.map(p => {
-              const pf = lastFrame.players.find(x => x.id === p.id);
-              if (pf) {
-                const tagColor = pf.colorTag as any;
-                return { ...p, x: pf.x, y: pf.y, colorTag: tagColor, docked: pf.docked, name: pf.name };
-              }
-              return p;
-            })
-          );
-          setBall({ ...lastFrame.ball });
+          const currentFramePlayers = players.map(p => {
+            const pf = lastFrame.players.find(x => x.id === p.id);
+            if (pf) {
+              const tagColor = pf.colorTag as any;
+              return { ...p, x: pf.x, y: pf.y, colorTag: tagColor, docked: pf.docked, name: pf.name };
+            }
+            return p;
+          });
+          
+          const currentFrameBall = { ...lastFrame.ball };
+          
+          const currentFrameEquipment = lastFrame.equipment
+            ? lastFrame.equipment.map(e => ({ ...e }))
+            : equipment;
+
+          setPlayers(currentFramePlayers);
+          setBall(currentFrameBall);
           if (lastFrame.equipment) {
-            setEquipment(lastFrame.equipment.map(e => ({ ...e })));
+            setEquipment(currentFrameEquipment);
+          }
+
+          // Call drawAll to render the frame's baseline onto the canvas
+          drawAll(currentFramePlayers, currentFrameBall, currentFrameEquipment);
+
+          // Draw the player tokens directly on the canvas
+          const canvas = canvasRef.current;
+          if (canvas) {
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              ctx.save();
+              if (canvas.width !== PITCH_WIDTH || canvas.height !== PITCH_HEIGHT) {
+                ctx.scale(canvas.width / PITCH_WIDTH, canvas.height / PITCH_HEIGHT);
+              }
+              
+              currentFramePlayers.forEach(pl => {
+                if (pl.docked) return;
+                
+                // Color mapping: blue for local, red for visitor, yellow for goalkeeper, green for referee
+                let color = '#2563eb'; // blue
+                if (pl.isGK) {
+                  color = '#fbbf24'; // yellow
+                } else if (pl.team === 'away') {
+                  color = '#dc2626'; // red
+                } else if (pl.id === 'referee') {
+                  color = '#10b981'; // green
+                }
+                
+                // Draw circle
+                ctx.beginPath();
+                ctx.arc(pl.x, pl.y, PLAYER_RADIUS, 0, 2 * Math.PI);
+                ctx.fillStyle = color;
+                ctx.fill();
+                
+                // Draw border/stroke
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+                
+                // Draw player number
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 16px Inter, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                const text = pl.id === 'referee' ? 'ÁRB' : pl.number.toString();
+                ctx.fillText(text, pl.x, pl.y);
+              });
+              
+              ctx.restore();
+            }
           }
           
           setTimeout(() => {
@@ -2132,45 +2225,98 @@ export default function TacticalCanvas({
           const timeDiff = f2.timestamp - f1.timestamp;
           const ratio = timeDiff === 0 ? 0 : (elapsed - f1.timestamp) / timeDiff;
 
-          setPlayers(prev =>
-            prev.map(p => {
-              const p1 = f1.players.find(x => x.id === p.id);
-              const p2 = f2.players.find(x => x.id === p.id);
-              if (p1 && p2) {
-                const tagColor = p2.colorTag as any;
-                return {
-                  ...p,
-                  x: p1.x + (p2.x - p1.x) * ratio,
-                  y: p1.y + (p2.y - p1.y) * ratio,
-                  colorTag: tagColor,
-                  docked: p2.docked,
-                  name: p2.name
-                };
-              }
-              return p;
-            })
-          );
-
-          setBall({
-            x: f1.ball.x + (f2.ball.x - f1.ball.x) * ratio,
-            y: f1.ball.y + (f2.ball.y - f1.ball.y) * ratio
+          const currentFramePlayers = players.map(p => {
+            const p1 = f1.players.find(x => x.id === p.id);
+            const p2 = f2.players.find(x => x.id === p.id);
+            if (p1 && p2) {
+              const tagColor = p2.colorTag as any;
+              return {
+                ...p,
+                x: p1.x + (p2.x - p1.x) * ratio,
+                y: p1.y + (p2.y - p1.y) * ratio,
+                colorTag: tagColor,
+                docked: p2.docked,
+                name: p2.name
+              };
+            }
+            return p;
           });
 
+          const currentFrameBall = {
+            x: f1.ball.x + (f2.ball.x - f1.ball.x) * ratio,
+            y: f1.ball.y + (f2.ball.y - f1.ball.y) * ratio
+          };
+
+          let currentFrameEquipment = equipment;
           if (f1.equipment && f2.equipment) {
-            setEquipment(prev =>
-              prev.map(eq => {
-                const eq1 = f1.equipment?.find(x => x.id === eq.id);
-                const eq2 = f2.equipment?.find(x => x.id === eq.id);
-                if (eq1 && eq2) {
-                  return {
-                    ...eq,
-                    x: eq1.x + (eq2.x - eq1.x) * ratio,
-                    y: eq1.y + (eq2.y - eq1.y) * ratio
-                  };
+            currentFrameEquipment = equipment.map(eq => {
+              const eq1 = f1.equipment?.find(x => x.id === eq.id);
+              const eq2 = f2.equipment?.find(x => x.id === eq.id);
+              if (eq1 && eq2) {
+                return {
+                  ...eq,
+                  x: eq1.x + (eq2.x - eq1.x) * ratio,
+                  y: eq1.y + (eq2.y - eq1.y) * ratio
+                };
+              }
+              return eq;
+            });
+          }
+
+          setPlayers(currentFramePlayers);
+          setBall(currentFrameBall);
+          if (f1.equipment && f2.equipment) {
+            setEquipment(currentFrameEquipment);
+          }
+
+          // Call drawAll to render the frame's baseline onto the canvas
+          drawAll(currentFramePlayers, currentFrameBall, currentFrameEquipment);
+
+          // Draw the player tokens directly on the canvas
+          const canvas = canvasRef.current;
+          if (canvas) {
+            const ctx = canvas.getContext('2d');
+            if (ctx) {
+              ctx.save();
+              if (canvas.width !== PITCH_WIDTH || canvas.height !== PITCH_HEIGHT) {
+                ctx.scale(canvas.width / PITCH_WIDTH, canvas.height / PITCH_HEIGHT);
+              }
+              
+              currentFramePlayers.forEach(pl => {
+                if (pl.docked) return;
+                
+                // Color mapping: blue for local, red for visitor, yellow for goalkeeper, green for referee
+                let color = '#2563eb'; // blue
+                if (pl.isGK) {
+                  color = '#fbbf24'; // yellow
+                } else if (pl.team === 'away') {
+                  color = '#dc2626'; // red
+                } else if (pl.id === 'referee') {
+                  color = '#10b981'; // green
                 }
-                return eq;
-              })
-            );
+                
+                // Draw circle
+                ctx.beginPath();
+                ctx.arc(pl.x, pl.y, PLAYER_RADIUS, 0, 2 * Math.PI);
+                ctx.fillStyle = color;
+                ctx.fill();
+                
+                // Draw border/stroke
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+                
+                // Draw player number
+                ctx.fillStyle = '#ffffff';
+                ctx.font = 'bold 16px Inter, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                const text = pl.id === 'referee' ? 'ÁRB' : pl.number.toString();
+                ctx.fillText(text, pl.x, pl.y);
+              });
+              
+              ctx.restore();
+            }
           }
 
           const progress = Math.min(100, (elapsed / duration) * 100);
