@@ -58,12 +58,12 @@ export type EquipmentItem = {
 };
 
 export type Drawing =
-  | { type: 'freehand'; color: string; thickness: number; points: Position[] }
-  | { type: 'line'; color: string; thickness: number; start: Position; end: Position }
-  | { type: 'arrow'; color: string; thickness: number; start: Position; end: Position }
-  | { type: 'circle'; color: string; thickness: number; center: Position; radius: number }
-  | { type: 'zone'; color: string; thickness: number; start: Position; end: Position }
-  | { type: 'text'; color: string; text: string; position: Position };
+  | { type: 'freehand'; color: string; thickness: number; points: Position[]; createdAtTime?: number }
+  | { type: 'line'; color: string; thickness: number; start: Position; end: Position; createdAtTime?: number }
+  | { type: 'arrow'; color: string; thickness: number; start: Position; end: Position; createdAtTime?: number }
+  | { type: 'circle'; color: string; thickness: number; center: Position; radius: number; createdAtTime?: number }
+  | { type: 'zone'; color: string; thickness: number; start: Position; end: Position; createdAtTime?: number }
+  | { type: 'text'; color: string; text: string; position: Position; createdAtTime?: number };
 
 type Frame = {
   timestamp: number;
@@ -299,9 +299,17 @@ export default function TacticalCanvas({
   const prevJsonTrackingRef = useRef<any>(null);
   const playbackTimeRef = useRef(0);
   const canvasTimerTimeRef = useRef<number | null>(null);
+  const activePlaybackTimeRef = useRef<number>(0);
+
   useEffect(() => {
     playbackTimeRef.current = currentPlaybackTime;
   }, [currentPlaybackTime]);
+
+  useEffect(() => {
+    if (!isPlaying && !isExporting) {
+      activePlaybackTimeRef.current = currentPlaybackTime;
+    }
+  }, [currentPlaybackTime, isPlaying, isExporting]);
 
   // Background Image State
   const [bgImage, setBgImage] = useState<HTMLImageElement | null>(null);
@@ -810,10 +818,12 @@ export default function TacticalCanvas({
 
       const animate = () => {
         const elapsed = Date.now() - startTime;
+        activePlaybackTimeRef.current = elapsed / 1000;
         const lastFrame = recordingFrames[recordingFrames.length - 1];
 
         if (elapsed >= lastFrame.timestamp) {
           setIsPlaying(false);
+          activePlaybackTimeRef.current = lastFrame.timestamp / 1000;
           setPlayers(prev =>
             prev.map(p => {
               const pf = lastFrame.players.find(x => x.id === p.id);
@@ -914,9 +924,11 @@ export default function TacticalCanvas({
       const animateTracking = () => {
         // Elapsed real-world seconds, scaled by playback speed
         const elapsedSeconds = ((performance.now() - startWallTime) / 1000) * playbackSpeed + minTime;
+        activePlaybackTimeRef.current = elapsedSeconds;
 
         if (elapsedSeconds >= maxTime) {
           setIsPlaying(false);
+          activePlaybackTimeRef.current = maxTime;
           if (onPlayStateChange) onPlayStateChange(false);
           // Snap to final positions
           setPlayers(prev => prev.map(p => {
@@ -1059,9 +1071,11 @@ export default function TacticalCanvas({
       const animateJson = () => {
         const elapsedReal = (performance.now() - startPerf) / 1000;
         let t = startPlayback + elapsedReal * playbackSpeed;
+        activePlaybackTimeRef.current = t;
 
         if (t >= duration) {
           t = duration;
+          activePlaybackTimeRef.current = duration;
           setCurrentPlaybackTime(duration);
           setIsPlaying(false);
           updatePlayersPositionsAtTime(duration);
@@ -1085,6 +1099,7 @@ export default function TacticalCanvas({
   // Sync players positions from JSON tracking with the video currentTime
   useEffect(() => {
     if (hasVideo && videoCurrentTime !== undefined) {
+      activePlaybackTimeRef.current = videoCurrentTime;
       setCurrentPlaybackTime(videoCurrentTime);
       updatePlayersPositionsAtTime(videoCurrentTime);
     }
@@ -1274,6 +1289,28 @@ export default function TacticalCanvas({
 
     // 2. Draw Completed Drawings
     drawings.forEach(item => {
+      const ANIMATION_DURATION = 1.5; // seconds
+      let p = 1.0;
+
+      if (item.createdAtTime !== undefined) {
+        const t = activePlaybackTimeRef.current;
+        if (t < item.createdAtTime) {
+          // Hidden (in the future relative to current playback cursor)
+          return;
+        }
+        if (t >= item.createdAtTime + ANIMATION_DURATION) {
+          p = 1.0;
+        } else {
+          // Interpolation window
+          if (!isPlaying && !isExporting && Math.abs(t - item.createdAtTime) < 0.05) {
+            p = 1.0;
+          } else {
+            p = (t - item.createdAtTime) / ANIMATION_DURATION;
+            p = Math.max(0, Math.min(1, p));
+          }
+        }
+      }
+
       ctx.strokeStyle = item.color;
       ctx.fillStyle = item.color;
       if (item.type !== 'text') {
@@ -1283,25 +1320,36 @@ export default function TacticalCanvas({
       ctx.lineJoin = 'round';
 
       if (item.type === 'freehand') {
+        if (item.points.length === 0) return;
+        const numPoints = Math.max(1, Math.floor(item.points.length * p));
         ctx.beginPath();
-        item.points.forEach((pt, idx) => {
+        for (let idx = 0; idx < numPoints; idx++) {
+          const pt = item.points[idx];
           if (idx === 0) ctx.moveTo(pt.x, pt.y);
           else ctx.lineTo(pt.x, pt.y);
-        });
+        }
         ctx.stroke();
       } else if (item.type === 'line') {
+        const interpEnd = {
+          x: item.start.x + (item.end.x - item.start.x) * p,
+          y: item.start.y + (item.end.y - item.start.y) * p
+        };
         ctx.beginPath();
         ctx.moveTo(item.start.x, item.start.y);
-        ctx.lineTo(item.end.x, item.end.y);
+        ctx.lineTo(interpEnd.x, interpEnd.y);
         ctx.stroke();
       } else if (item.type === 'arrow') {
+        const interpEnd = {
+          x: item.start.x + (item.end.x - item.start.x) * p,
+          y: item.start.y + (item.end.y - item.start.y) * p
+        };
         ctx.beginPath();
         ctx.moveTo(item.start.x, item.start.y);
-        ctx.lineTo(item.end.x, item.end.y);
+        ctx.lineTo(interpEnd.x, interpEnd.y);
         ctx.stroke();
 
         const start = item.start;
-        const end = item.end;
+        const end = interpEnd;
         const dx = end.x - start.x;
         const dy = end.y - start.y;
         const len = Math.sqrt(dx * dx + dy * dy);
@@ -1322,24 +1370,31 @@ export default function TacticalCanvas({
           ctx.fill();
         }
       } else if (item.type === 'circle') {
+        const interpRadius = item.radius * p;
         ctx.beginPath();
-        ctx.arc(item.center.x, item.center.y, item.radius, 0, 2 * Math.PI);
+        ctx.arc(item.center.x, item.center.y, interpRadius, 0, 2 * Math.PI);
         ctx.stroke();
       } else if (item.type === 'zone') {
-        // Draw zone overlays with 25% opacity fill
-        ctx.fillStyle = hexToRgba(item.color, 0.25);
-        const w = item.end.x - item.start.x;
-        const h = item.end.y - item.start.y;
+        const interpEnd = {
+          x: item.start.x + (item.end.x - item.start.x) * p,
+          y: item.start.y + (item.end.y - item.start.y) * p
+        };
+        ctx.fillStyle = hexToRgba(item.color, 0.25 * p);
+        const w = interpEnd.x - item.start.x;
+        const h = interpEnd.y - item.start.y;
         ctx.fillRect(item.start.x, item.start.y, w, h);
         ctx.strokeStyle = item.color;
         ctx.lineWidth = 2;
         ctx.strokeRect(item.start.x, item.start.y, w, h);
       } else if (item.type === 'text') {
+        ctx.save();
+        ctx.globalAlpha = p;
         ctx.fillStyle = item.color;
         ctx.font = 'bold 20px Inter, sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(item.text, item.position.x, item.position.y);
+        ctx.restore();
       }
     });
 
@@ -1664,7 +1719,7 @@ export default function TacticalCanvas({
     }
 
     ctx.restore();
-  }, [players, ball, drawings, activeDrawing, draggingItem, selectedPlayerId, pitchType, equipment, isPresentationMode, zoomScale, panOffset, laserPos, isExporting]);
+  }, [players, ball, drawings, activeDrawing, draggingItem, selectedPlayerId, pitchType, equipment, isPresentationMode, zoomScale, panOffset, laserPos, isExporting, currentPlaybackTime]);
 
   useEffect(() => {
     drawAll();
@@ -1750,7 +1805,7 @@ export default function TacticalCanvas({
       } else if (toolMode === 'text') {
         const textVal = prompt('Introduce el texto a añadir:');
         if (textVal && textVal.trim()) {
-          setDrawings(prev => [...prev, { type: 'text', color: drawingColor, text: textVal.trim(), position: pt }]);
+          setDrawings(prev => [...prev, { type: 'text', color: drawingColor, text: textVal.trim(), position: pt, createdAtTime: currentPlaybackTime }]);
         }
       }
     }
@@ -1868,7 +1923,8 @@ export default function TacticalCanvas({
       }
       setDraggingItem(null);
     } else if (activeDrawing) {
-      setDrawings(prev => [...prev, activeDrawing]);
+      const completedDrawing = { ...activeDrawing, createdAtTime: currentPlaybackTime };
+      setDrawings(prev => [...prev, completedDrawing]);
       setActiveDrawing(null);
     }
   };
@@ -2149,9 +2205,11 @@ export default function TacticalCanvas({
 
       const animateExport = () => {
         const elapsed = performance.now() - startPerf;
+        activePlaybackTimeRef.current = elapsed / 1000;
 
         if (elapsed >= duration) {
           canvasTimerTimeRef.current = duration;
+          activePlaybackTimeRef.current = duration / 1000;
           // Apply final frame positions
           const currentFramePlayers = players.map(p => {
             const pf = lastFrame.players.find(x => x.id === p.id);
