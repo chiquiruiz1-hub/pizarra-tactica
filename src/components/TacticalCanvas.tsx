@@ -2093,6 +2093,11 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
                     return (
                       <div
                         key={pl.id}
+                        onContextMenu={(e) => {
+                          e.preventDefault();
+                          setPlayers(prev => prev.map(p => p.id === pl.id ? { ...p, x: 0, y: 0, docked: true } : p));
+                          setSelectedPlayerId(null);
+                        }}
                         style={{
                           position: 'absolute',
                           left: `${(pl.x / PITCH_WIDTH) * 100}%`,
@@ -2197,7 +2202,7 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
       {!isPresentationMode && (
         <div className="footer-info text-muted">
           {toolMode === 'move' ? (
-            <p>⚽ Modo Mover: Arrastra las fichas desde los banquillos laterales al campo. Haz **doble clic** en una ficha del campo para devolverla al banquillo. **Doble clic** en los nombres del banquillo para editarlos.</p>
+            <p>⚽ Modo Mover: Arrastra fichas al campo · Clic derecho sobre una ficha para devolverla al banquillo</p>
           ) : toolMode === 'zone' ? (
             <p>🟩 Modo Zonas: Arrastra en diagonal en el campo para crear rectángulos semi-transparentes para marcar zonas tácticas (presión, peligro).</p>
           ) : toolMode === 'text' ? (
