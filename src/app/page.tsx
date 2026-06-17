@@ -7,6 +7,7 @@ import LibraryView from '../components/LibraryView';
 import PresentationView from '../components/PresentationView';
 import VideosSection from '../components/VideosSection';
 import ScoutingSection from '../components/ScoutingSection';
+import VestuarioMode from '../components/VestuarioMode';
 import {
   Home,
   Layers,
@@ -18,7 +19,8 @@ import {
   X,
   Zap,
   Tv,
-  Shield
+  Shield,
+  Tablet
 } from 'lucide-react';
 
 export type PlayCategory = 'Táctica' | 'Balón parado' | 'Entrenamiento';
@@ -44,6 +46,7 @@ export default function PizarraProApp() {
   const [activeSection, setActiveSection] = useState<string>('inicio');
   const [plays, setPlays] = useState<SavedPlay[]>([]);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [vestuarioOpen, setVestuarioOpen] = useState(false);
 
   // Initial play data passed to editor when editing or loading a shared URL state
   const [editorInitialData, setEditorInitialData] = useState<{
@@ -217,7 +220,8 @@ export default function PizarraProApp() {
     { id: 'videos', label: 'Vídeos', icon: Tv },
     { id: 'rivales', label: 'Rivales', icon: Shield },
     { id: 'biblioteca', label: 'Biblioteca', icon: FolderOpen },
-    { id: 'presentacion', label: 'Presentación', icon: Monitor }
+    { id: 'presentacion', label: 'Presentación', icon: Monitor },
+    { id: 'vestuario', label: 'Modo Vestuario', icon: Tablet, action: () => setVestuarioOpen(true) }
   ];
 
   return (
@@ -237,6 +241,11 @@ export default function PizarraProApp() {
               <button
                 key={item.id}
                 onClick={() => {
+                  if ((item as any).action) {
+                    (item as any).action();
+                    setSidebarOpen(false);
+                    return;
+                  }
                   setActiveSection(item.id);
                   setSidebarOpen(false);
                   // Clear editor data when switching tabs (unless going into edit flow)
@@ -286,6 +295,7 @@ export default function PizarraProApp() {
               mode="tactica"
               onSave={handleSavePlay}
               initialPlayData={editorInitialData}
+              onOpenVestuario={() => setVestuarioOpen(true)}
             />
           </div>
         )}
@@ -297,6 +307,7 @@ export default function PizarraProApp() {
               mode="parado"
               onSave={handleSavePlay}
               initialPlayData={editorInitialData}
+              onOpenVestuario={() => setVestuarioOpen(true)}
             />
           </div>
         )}
@@ -308,6 +319,7 @@ export default function PizarraProApp() {
               mode="entrenamiento"
               onSave={handleSavePlay}
               initialPlayData={editorInitialData}
+              onOpenVestuario={() => setVestuarioOpen(true)}
             />
           </div>
         )}
@@ -350,6 +362,11 @@ export default function PizarraProApp() {
           </div>
         )}
       </div>
+
+      {/* VESTUARIO MODE OVERLAY */}
+      {vestuarioOpen && (
+        <VestuarioMode onClose={() => setVestuarioOpen(false)} />
+      )}
     </div>
   );
 }

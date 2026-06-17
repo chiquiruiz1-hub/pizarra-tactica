@@ -22,7 +22,8 @@ import {
   Type,
   Maximize,
   Grid,
-  RefreshCw
+  RefreshCw,
+  Tablet
 } from 'lucide-react';
 
 const PITCH_WIDTH = 1200;
@@ -195,6 +196,7 @@ interface TacticalCanvasProps {
   onPlayStateChange?: (playing: boolean) => void;
   hasVideo?: boolean;
   onSeekVideo?: (time: number) => void;
+  onOpenVestuario?: () => void;
 }
 
 export default function TacticalCanvas({
@@ -210,7 +212,8 @@ export default function TacticalCanvas({
   videoIsPlaying,
   onPlayStateChange,
   hasVideo,
-  onSeekVideo
+  onSeekVideo,
+  onOpenVestuario
 }: TacticalCanvasProps) {
   // State declaration
   const [pitchType, setPitchType] = useState<'full' | 'half'>('full');
@@ -2620,6 +2623,12 @@ export default function TacticalCanvas({
                 <Monitor size={16} />
                 <span>Presentar</span>
               </button>
+              {onOpenVestuario && (
+                <button onClick={onOpenVestuario} className="action-btn flex-center gap-1 font-semibold" style={{ background: '#0e7490', color: '#fff', borderColor: '#0e7490' }}>
+                  <Tablet size={16} />
+                  <span>Vestuario</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
