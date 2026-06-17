@@ -28,6 +28,13 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
 
+  // JSON Tracking State
+  const [jsonTrackingData, setJsonTrackingData] = useState<{
+    fps: number;
+    duration: number;
+    frames: { t: number; players: { x: number; y: number }[] }[];
+  } | null>(null);
+
   const videoRef = useRef<HTMLVideoElement>(null);
 
   // Helper to parse video URLs
@@ -83,6 +90,9 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
       if (initialPlayData.trackingKeyframes) {
         setTrackingKeyframes(initialPlayData.trackingKeyframes);
       }
+      if (initialPlayData.jsonTrackingData) {
+        setJsonTrackingData(initialPlayData.jsonTrackingData);
+      }
     }
   }, [initialPlayData]);
 
@@ -118,6 +128,7 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
     setCaptureNotice(null);
     setTrackingKeyframes([]);
     setIsRotoscopyActive(false);
+    setJsonTrackingData(null);
     
     // Clear canvas background if we load a new video
     if (!initialPlayData || initialPlayData.videoUrl !== videoUrl) {
@@ -146,6 +157,7 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
     setCanvasBg(null);
     setTrackingKeyframes([]);
     setIsRotoscopyActive(false);
+    setJsonTrackingData(null);
   };
 
   // Capture frame handler
@@ -258,13 +270,61 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
     setPendingCoords(null);
   };
 
+  // Import JSON tracking file handler
+  const handleJsonImport = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const data = JSON.parse(event.target?.result as string);
+        if (data && typeof data === 'object' && Array.isArray(data.frames)) {
+          setJsonTrackingData(data);
+          setCaptureNotice('¡JSON de tracking importado con éxito!');
+          setTimeout(() => setCaptureNotice(null), 3000);
+        } else {
+          setCaptureNotice('Error: El formato de JSON no contiene la estructura de frames correcta.');
+          setTimeout(() => setCaptureNotice(null), 5000);
+        }
+      } catch (err) {
+        console.error('Error parsing JSON', err);
+        setCaptureNotice('Error: No se pudo parsear el archivo JSON.');
+        setTimeout(() => setCaptureNotice(null), 5000);
+      }
+    };
+    reader.readAsText(file);
+    e.target.value = '';
+  };
+
+  const handleClearJsonTracking = () => {
+    setJsonTrackingData(null);
+  };
+
+  // Whiteboard Play button synchronization
+  const handleWhiteboardPlayChange = (playing: boolean) => {
+    const video = videoRef.current;
+    if (video && videoType === 'mp4') {
+      if (playing) {
+        video.play().catch(() => {});
+        setIsPlaying(true);
+      } else {
+        video.pause();
+        setIsPlaying(false);
+      }
+    } else {
+      setIsPlaying(playing);
+    }
+  };
+
   // Wrapper for TacticalCanvas save trigger
   const handleSavePlay = (name: string, playData: any) => {
     if (onSave) {
       onSave(name, {
         ...playData,
         videoUrl: videoUrl.trim(), // Link the video URL to the play object
-        trackingKeyframes // Save tracking keyframes
+        trackingKeyframes, // Save tracking keyframes
+        jsonTrackingData // Save imported json tracking
       });
     }
   };
@@ -298,7 +358,7 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
             </button>
           </div>
           
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.5rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
             <input
               type="file"
               accept="video/mp4"
@@ -327,7 +387,53 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
               <Upload size={16} />
               <span>Subir vídeo MP4</span>
             </label>
+
+            {/* Import JSON Button */}
+            <input
+              type="file"
+              accept=".json"
+              id="json-import"
+              className="hidden"
+              onChange={handleJsonImport}
+            />
+            <label
+              htmlFor="json-import"
+              className="action-btn secondary-btn flex-center gap-1 cursor-pointer"
+              style={{
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '0.5rem 1rem',
+                fontSize: '0.85rem',
+                fontWeight: 500,
+                borderRadius: '8px',
+                border: '1px solid var(--border-color)',
+                backgroundColor: 'rgba(255, 255, 255, 0.05)',
+                color: 'var(--text-primary)',
+                transition: 'var(--transition-smooth)'
+              }}
+            >
+              <Upload size={16} style={{ color: 'var(--accent-yellow)' }} />
+              <span>Importar tracking JSON</span>
+            </label>
           </div>
+
+          {/* JSON Loaded metadata & controls */}
+          {jsonTrackingData && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.5rem', fontSize: '0.85rem', color: '#e2e8f0' }}>
+              <span style={{ fontWeight: 500 }}>
+                {jsonTrackingData.frames[0]?.players.length || 0} jugadores detectados · {jsonTrackingData.duration} segundos
+              </span>
+              <button
+                onClick={handleClearJsonTracking}
+                className="action-btn danger-border text-red"
+                style={{ fontSize: '0.75rem', height: 28, padding: '0 0.5rem' }}
+              >
+                Limpiar tracking
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Player viewport */}
@@ -736,6 +842,12 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
           onClearBackground={() => setCanvasBg(null)}
           initialPlayData={initialPlayData}
           trackingKeyframes={trackingKeyframes}
+          jsonTrackingData={jsonTrackingData}
+          onClearJsonTracking={handleClearJsonTracking}
+          videoCurrentTime={currentTime}
+          videoIsPlaying={isPlaying}
+          onPlayStateChange={handleWhiteboardPlayChange}
+          hasVideo={!!loadedUrl}
         />
       </div>
     </div>

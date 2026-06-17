@@ -37,6 +37,7 @@ export interface SavedPlay {
   videoUrl?: string;
   backgroundImage?: string;
   trackingKeyframes?: { playerId: string; timestamp: number; x: number; y: number }[];
+  jsonTrackingData?: any;
 }
 
 export default function PizarraProApp() {
@@ -54,6 +55,7 @@ export default function PizarraProApp() {
     backgroundImage?: string;
     videoUrl?: string;
     trackingKeyframes?: { playerId: string; timestamp: number; x: number; y: number }[];
+    jsonTrackingData?: any;
   } | null>(null);
 
   // Active play ID for presentation mode
@@ -109,7 +111,8 @@ export default function PizarraProApp() {
           equipment: decoded.equipment || [],
           backgroundImage: decoded.backgroundImage || '',
           videoUrl: decoded.videoUrl || '',
-          trackingKeyframes: decoded.trackingKeyframes || []
+          trackingKeyframes: decoded.trackingKeyframes || [],
+          jsonTrackingData: decoded.jsonTrackingData || null
         };
 
         setEditorInitialData(loadedPlay);
@@ -149,7 +152,8 @@ export default function PizarraProApp() {
       thumbnail: canvasData.thumbnail,
       videoUrl: canvasData.videoUrl,
       backgroundImage: canvasData.backgroundImage,
-      trackingKeyframes: canvasData.trackingKeyframes
+      trackingKeyframes: canvasData.trackingKeyframes,
+      jsonTrackingData: canvasData.jsonTrackingData
     };
 
     const updated = [newPlay, ...plays];
@@ -179,7 +183,8 @@ export default function PizarraProApp() {
       equipment: play.equipment || [],
       backgroundImage: play.backgroundImage,
       videoUrl: play.videoUrl,
-      trackingKeyframes: play.trackingKeyframes || []
+      trackingKeyframes: play.trackingKeyframes || [],
+      jsonTrackingData: play.jsonTrackingData || null
     });
 
     // Determine destination tab
