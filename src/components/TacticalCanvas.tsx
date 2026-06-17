@@ -164,7 +164,7 @@ const hexToRgba = (hex: string, alpha: number) => {
 
 interface TacticalCanvasProps {
   mode: 'tactica' | 'parado' | 'entrenamiento' | 'videos';
-  onSave?: (name: string, data: { players: Player[]; ball: Position; drawings: Drawing[]; pitchType: 'full' | 'half'; equipment: EquipmentItem[]; thumbnail: string; backgroundImage?: string }) => void;
+  onSave?: (name: string, data: { players: Player[]; ball: Position; drawings: Drawing[]; pitchType: 'full' | 'half'; equipment: EquipmentItem[]; thumbnail: string; backgroundImage?: string; trackingKeyframes?: { playerId: string; timestamp: number; x: number; y: number }[] }) => void;
   initialPlayData?: {
     players: Player[];
     ball: Position;
@@ -172,12 +172,14 @@ interface TacticalCanvasProps {
     pitchType: 'full' | 'half';
     equipment: EquipmentItem[];
     backgroundImage?: string;
+    trackingKeyframes?: { playerId: string; timestamp: number; x: number; y: number }[];
   } | null;
   backgroundImage?: string;
   onClearBackground?: () => void;
+  trackingKeyframes?: { playerId: string; timestamp: number; x: number; y: number }[];
 }
 
-export default function TacticalCanvas({ mode, onSave, initialPlayData, backgroundImage, onClearBackground }: TacticalCanvasProps) {
+export default function TacticalCanvas({ mode, onSave, initialPlayData, backgroundImage, onClearBackground, trackingKeyframes }: TacticalCanvasProps) {
   // State declaration
   const [pitchType, setPitchType] = useState<'full' | 'half'>('full');
   const [formHome, setFormHome] = useState<string>('4-3-3');
@@ -781,6 +783,92 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
       }
     };
   }, [isPlaying, recordingFrames]);
+
+  // Tracking Playback ticks (LERP)
+  useEffect(() => {
+    const hasTracking = trackingKeyframes && trackingKeyframes.length > 0;
+    if (isPlaying && hasTracking && recordingFrames.length === 0) {
+      const startTime = Date.now();
+
+      const animateTracking = () => {
+        const elapsedSeconds = (Date.now() - startTime) / 1000;
+        const maxTime = Math.max(...(trackingKeyframes || []).map(k => k.timestamp), 0);
+
+        if (elapsedSeconds >= maxTime) {
+          setIsPlaying(false);
+          // Set to final position
+          setPlayers(prev => prev.map(p => {
+            const pKfs = (trackingKeyframes || []).filter(k => k.playerId === p.id);
+            if (pKfs.length > 0) {
+              const lastKf = pKfs.reduce((prevKf, currentKf) => currentKf.timestamp > prevKf.timestamp ? currentKf : prevKf);
+              return {
+                ...p,
+                x: (lastKf.x / 100) * PITCH_WIDTH,
+                y: (lastKf.y / 100) * PITCH_HEIGHT,
+                docked: false
+              };
+            }
+            return p;
+          }));
+        } else {
+          // LERP calculations for each player
+          setPlayers(prev => prev.map(p => {
+            const pKfs = (trackingKeyframes || []).filter(k => k.playerId === p.id).sort((a, b) => a.timestamp - b.timestamp);
+            if (pKfs.length === 0) return p;
+
+            if (elapsedSeconds <= pKfs[0].timestamp) {
+              return {
+                ...p,
+                x: (pKfs[0].x / 100) * PITCH_WIDTH,
+                y: (pKfs[0].y / 100) * PITCH_HEIGHT,
+                docked: false
+              };
+            }
+
+            if (elapsedSeconds >= pKfs[pKfs.length - 1].timestamp) {
+              return {
+                ...p,
+                x: (pKfs[pKfs.length - 1].x / 100) * PITCH_WIDTH,
+                y: (pKfs[pKfs.length - 1].y / 100) * PITCH_HEIGHT,
+                docked: false
+              };
+            }
+
+            // Find keyframes to interpolate
+            let kA = pKfs[0];
+            let kB = pKfs[pKfs.length - 1];
+            for (let i = 0; i < pKfs.length - 1; i++) {
+              if (pKfs[i].timestamp <= elapsedSeconds && pKfs[i + 1].timestamp >= elapsedSeconds) {
+                kA = pKfs[i];
+                kB = pKfs[i + 1];
+                break;
+              }
+            }
+
+            const timeDiff = kB.timestamp - kA.timestamp;
+            const ratio = timeDiff === 0 ? 0 : (elapsedSeconds - kA.timestamp) / timeDiff;
+
+            return {
+              ...p,
+              x: ((kA.x + (kB.x - kA.x) * ratio) / 100) * PITCH_WIDTH,
+              y: ((kA.y + (kB.y - kA.y) * ratio) / 100) * PITCH_HEIGHT,
+              docked: false
+            };
+          }));
+
+          playbackAnimRef.current = requestAnimationFrame(animateTracking);
+        }
+      };
+
+      playbackAnimRef.current = requestAnimationFrame(animateTracking);
+    }
+
+    return () => {
+      if (playbackAnimRef.current) {
+        cancelAnimationFrame(playbackAnimRef.current);
+      }
+    };
+  }, [isPlaying, trackingKeyframes, recordingFrames]);
 
   // Field Drawing Utility
   const drawPitch = (ctx: CanvasRenderingContext2D) => {
@@ -1523,15 +1611,25 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
   };
 
   const handlePlayToggle = () => {
-    if (isRecording || recordingFrames.length === 0) return;
+    if (isRecording) return;
+    
+    const hasTracking = trackingKeyframes && trackingKeyframes.length > 0;
+    if (recordingFrames.length === 0 && !hasTracking) return;
 
     if (isPlaying) {
       setIsPlaying(false);
     } else {
-      if (initialState) {
+      if (recordingFrames.length > 0 && initialState) {
         setPlayers(initialState.players.map(p => ({ ...p })));
         setBall({ ...initialState.ball });
         setEquipment(initialState.equipment.map(e => ({ ...e })));
+      } else if (hasTracking) {
+        setInitialState({
+          players: players.map(p => ({ ...p })),
+          ball: { ...ball },
+          drawings: drawings.map(d => ({ ...d })),
+          equipment: equipment.map(e => ({ ...e }))
+        });
       }
       setIsPlaying(true);
     }
@@ -1630,7 +1728,8 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
         pitchType,
         equipment: equipment.map(e => ({ ...e })),
         thumbnail,
-        backgroundImage: backgroundImage || (initialPlayData && initialPlayData.backgroundImage) || ''
+        backgroundImage: backgroundImage || (initialPlayData && initialPlayData.backgroundImage) || '',
+        trackingKeyframes: trackingKeyframes || []
       });
       setSaveName('');
       setShowSaveModal(false);
@@ -1747,7 +1846,7 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
                 <Video size={16} className={isRecording ? 'pulse' : ''} />
                 <span>{isRecording ? 'Grabando' : 'Grabar'}</span>
               </button>
-              <button onClick={handlePlayToggle} className={`play-btn ${isPlaying ? 'playing' : ''}`} disabled={isRecording || recordingFrames.length === 0}>
+              <button onClick={handlePlayToggle} className={`play-btn ${isPlaying ? 'playing' : ''}`} disabled={isRecording || (recordingFrames.length === 0 && (!trackingKeyframes || trackingKeyframes.length === 0))}>
                 <Play size={16} />
                 <span>{isPlaying ? 'Parar' : 'Play'}</span>
               </button>

@@ -19,6 +19,15 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
   const [captureNotice, setCaptureNotice] = useState<string | null>(null);
   const [localVideoUrl, setLocalVideoUrl] = useState<string | null>(null);
 
+  // Rotoscopy State
+  const [isRotoscopyActive, setIsRotoscopyActive] = useState(false);
+  const [trackingKeyframes, setTrackingKeyframes] = useState<{ playerId: string; timestamp: number; x: number; y: number }[]>([]);
+  const [showPlayerMenu, setShowPlayerMenu] = useState(false);
+  const [menuPosition, setMenuPosition] = useState<{ x: number; y: number; pageX: number; pageY: number } | null>(null);
+  const [pendingCoords, setPendingCoords] = useState<{ x: number; y: number } | null>(null);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+
   const videoRef = useRef<HTMLVideoElement>(null);
 
   // Helper to parse video URLs
@@ -71,6 +80,9 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
       if (initialPlayData.backgroundImage) {
         setCanvasBg(initialPlayData.backgroundImage);
       }
+      if (initialPlayData.trackingKeyframes) {
+        setTrackingKeyframes(initialPlayData.trackingKeyframes);
+      }
     }
   }, [initialPlayData]);
 
@@ -82,6 +94,13 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
       }
     };
   }, [localVideoUrl]);
+
+  // Close player selection menu when video starts playing
+  useEffect(() => {
+    if (isPlaying) {
+      setShowPlayerMenu(false);
+    }
+  }, [isPlaying]);
 
   // Load trigger
   const handleLoadVideo = () => {
@@ -97,6 +116,8 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
     setIsPlaying(false);
     setPlaySpeed(1);
     setCaptureNotice(null);
+    setTrackingKeyframes([]);
+    setIsRotoscopyActive(false);
     
     // Clear canvas background if we load a new video
     if (!initialPlayData || initialPlayData.videoUrl !== videoUrl) {
@@ -123,6 +144,8 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
     setPlaySpeed(1);
     setCaptureNotice(null);
     setCanvasBg(null);
+    setTrackingKeyframes([]);
+    setIsRotoscopyActive(false);
   };
 
   // Capture frame handler
@@ -175,14 +198,84 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
     }
   };
 
+  // Skip 1 frame back (1/30s at 30fps)
+  const handlePrevFrame = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.pause();
+    setIsPlaying(false);
+    video.currentTime = Math.max(0, video.currentTime - 1 / 30);
+    setCurrentTime(video.currentTime);
+  };
+
+  // Skip 1 frame forward (1/30s at 30fps)
+  const handleNextFrame = () => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.pause();
+    setIsPlaying(false);
+    video.currentTime = Math.min(video.duration || 100, video.currentTime + 1 / 30);
+    setCurrentTime(video.currentTime);
+  };
+
+  // Handle click on the tracking overlay
+  const handleOverlayClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (!isRotoscopyActive || isPlaying) return;
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+
+    // Show context menu at relative click position
+    setMenuPosition({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+      pageX: e.clientX,
+      pageY: e.clientY
+    });
+    setPendingCoords({ x, y });
+    setShowPlayerMenu(true);
+  };
+
+  // Associate clicked coordinate with a specific player ID
+  const handleSelectPlayer = (playerId: string) => {
+    if (!pendingCoords) return;
+
+    const newKf = {
+      playerId,
+      timestamp: currentTime,
+      x: pendingCoords.x,
+      y: pendingCoords.y
+    };
+
+    setTrackingKeyframes(prev => {
+      // Remove any keyframe for the same player at a very similar timestamp (within 0.1s) to allow re-marking
+      const filtered = prev.filter(k => !(k.playerId === playerId && Math.abs(k.timestamp - currentTime) < 0.1));
+      return [...filtered, newKf].sort((a, b) => a.timestamp - b.timestamp);
+    });
+
+    setShowPlayerMenu(false);
+    setPendingCoords(null);
+  };
+
   // Wrapper for TacticalCanvas save trigger
   const handleSavePlay = (name: string, playData: any) => {
     if (onSave) {
       onSave(name, {
         ...playData,
-        videoUrl: videoUrl.trim() // Link the video URL to the play object
+        videoUrl: videoUrl.trim(), // Link the video URL to the play object
+        trackingKeyframes // Save tracking keyframes
       });
     }
+  };
+
+  // Helper to format time into MM:SS.ms
+  const formatTime = (secs: number) => {
+    if (isNaN(secs)) return '00:00.00';
+    const m = Math.floor(secs / 60);
+    const s = Math.floor(secs % 60);
+    const ms = Math.floor((secs % 1) * 100);
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}.${ms.toString().padStart(2, '0')}`;
   };
 
   return (
@@ -261,32 +354,264 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
                 />
               )}
               {videoType === 'mp4' && (
-                <div className="mp4-player-container">
+                <div className="mp4-player-container" style={{ position: 'relative', width: '100%', height: '100%' }}>
                   <video
                     ref={videoRef}
                     src={loadedUrl}
                     crossOrigin="anonymous"
                     onPlay={() => setIsPlaying(true)}
                     onPause={() => setIsPlaying(false)}
+                    onTimeUpdate={(e) => setCurrentTime(e.currentTarget.currentTime)}
+                    onDurationChange={(e) => setDuration(e.currentTarget.duration)}
                     className="mp4-video-element"
+                    style={{ width: '100%', height: '100%', display: 'block', objectFit: 'contain' }}
                   />
+
+                  {/* Rotoscopy Tracking Overlay */}
+                  {isRotoscopyActive && (
+                    <div
+                      onClick={isPlaying ? undefined : handleOverlayClick}
+                      style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        width: '100%',
+                        height: '100%',
+                        zIndex: 20,
+                        cursor: isPlaying ? 'default' : 'crosshair',
+                        backgroundColor: isPlaying ? 'transparent' : 'rgba(0, 0, 0, 0.15)',
+                        pointerEvents: isPlaying ? 'none' : 'auto'
+                      }}
+                    >
+                      {/* Guide Dots (Keyframes) */}
+                      {trackingKeyframes.map((kf, idx) => {
+                        const isHome = kf.playerId.startsWith('home');
+                        const isRef = kf.playerId === 'referee';
+                        const color = isRef ? '#10b981' : isHome ? '#3b82f6' : '#ef4444';
+                        const num = isRef ? 'R' : kf.playerId.split('_')[1];
+                        
+                        // Check if keyframe is close to current video play time (within 0.8s)
+                        const isClose = Math.abs(kf.timestamp - currentTime) < 0.8;
+                        
+                        return (
+                          <div
+                            key={idx}
+                            style={{
+                              position: 'absolute',
+                              left: `${kf.x}%`,
+                              top: `${kf.y}%`,
+                              width: '24px',
+                              height: '24px',
+                              borderRadius: '50%',
+                              backgroundColor: color,
+                              border: '2px solid white',
+                              transform: 'translate(-50%, -50%)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              color: 'white',
+                              fontSize: '10px',
+                              fontWeight: 'bold',
+                              opacity: isClose ? 1.0 : 0.25,
+                              boxShadow: isClose ? '0 0 0 4px rgba(255, 255, 255, 0.4)' : 'none',
+                              transition: 'opacity 0.2s',
+                              pointerEvents: 'none'
+                            }}
+                          >
+                            {num}
+                          </div>
+                        );
+                      })}
+
+                      {/* Floating player selection menu */}
+                      {showPlayerMenu && menuPosition && (() => {
+                        const rect = videoRef.current?.getBoundingClientRect();
+                        const width = rect?.width || 600;
+                        const height = rect?.height || 350;
+                        const leftPos = menuPosition.x > width - 220 ? menuPosition.x - 220 : menuPosition.x + 10;
+                        const topPos = menuPosition.y > height - 240 ? menuPosition.y - 240 : menuPosition.y + 10;
+                        return (
+                          <div
+                            onClick={(e) => e.stopPropagation()} // Prevent clicking through to overlay
+                            style={{
+                              position: 'absolute',
+                              left: `${leftPos}px`,
+                              top: `${topPos}px`,
+                              backgroundColor: '#0e1220',
+                              border: '1px solid rgba(255, 255, 255, 0.15)',
+                              borderRadius: '8px',
+                              padding: '0.5rem',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '0.5rem',
+                              zIndex: 30,
+                              maxHeight: '220px',
+                              overflowY: 'auto',
+                              boxShadow: '0 10px 25px rgba(0,0,0,0.5)',
+                              width: '200px',
+                              pointerEvents: 'auto'
+                            }}
+                          >
+                            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '0.25rem', textAlign: 'center' }}>
+                              Asignar ficha en t={currentTime.toFixed(2)}s
+                            </span>
+                            
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                              <span style={{ fontSize: '0.65rem', color: '#3b82f6', fontWeight: 'bold' }}>LOCAL</span>
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.25rem' }}>
+                                {Array.from({ length: 11 }, (_, i) => i + 1).map((n) => (
+                                  <button
+                                    key={`home_${n}`}
+                                    onClick={() => handleSelectPlayer(`home_${n}`)}
+                                    style={{
+                                      padding: '0.25rem',
+                                      fontSize: '0.75rem',
+                                      borderRadius: '4px',
+                                      backgroundColor: '#2563eb',
+                                      color: 'white',
+                                      border: 'none',
+                                      cursor: 'pointer',
+                                      fontWeight: 'bold'
+                                    }}
+                                  >
+                                    {n}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                              <span style={{ fontSize: '0.65rem', color: '#ef4444', fontWeight: 'bold' }}>VISITANTE</span>
+                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.25rem' }}>
+                                {Array.from({ length: 11 }, (_, i) => i + 1).map((n) => (
+                                  <button
+                                    key={`away_${n}`}
+                                    onClick={() => handleSelectPlayer(`away_${n}`)}
+                                    style={{
+                                      padding: '0.25rem',
+                                      fontSize: '0.75rem',
+                                      borderRadius: '4px',
+                                      backgroundColor: '#dc2626',
+                                      color: 'white',
+                                      border: 'none',
+                                      cursor: 'pointer',
+                                      fontWeight: 'bold'
+                                    }}
+                                  >
+                                    {n}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            <button
+                              onClick={() => handleSelectPlayer('referee')}
+                              style={{
+                                padding: '0.25rem',
+                                fontSize: '0.75rem',
+                                borderRadius: '4px',
+                                backgroundColor: '#10b981',
+                                color: 'white',
+                                border: 'none',
+                                cursor: 'pointer',
+                                fontWeight: 'bold',
+                                marginTop: '0.25rem'
+                              }}
+                            >
+                              Árbitro
+                            </button>
+
+                            <button
+                              onClick={() => setShowPlayerMenu(false)}
+                              style={{
+                                padding: '0.25rem',
+                                fontSize: '0.75rem',
+                                borderRadius: '4px',
+                                backgroundColor: 'rgba(255,255,255,0.05)',
+                                color: '#94a3b8',
+                                border: '1px solid rgba(255,255,255,0.1)',
+                                cursor: 'pointer',
+                                marginTop: '0.25rem'
+                              }}
+                            >
+                              Cancelar
+                            </button>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
                   
                   {/* Custom Controls for MP4 */}
-                  <div className="mp4-controls-overlay">
-                    <button onClick={togglePlayPause} className="mp4-ctrl-btn">
-                      {isPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
-                    </button>
+                  <div className="mp4-controls-overlay" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', padding: '0.75rem 1rem' }}>
+                    {/* Time Slider */}
+                    <div style={{ width: '100%', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                      <input
+                        type="range"
+                        min={0}
+                        max={duration || 100}
+                        step={0.01}
+                        value={currentTime}
+                        onChange={(e) => {
+                          const val = parseFloat(e.target.value);
+                          setCurrentTime(val);
+                          if (videoRef.current) {
+                            videoRef.current.currentTime = val;
+                          }
+                        }}
+                        style={{
+                          flex: 1,
+                          height: '4px',
+                          borderRadius: '2px',
+                          background: 'rgba(255,255,255,0.2)',
+                          accentColor: 'var(--accent-color)',
+                          cursor: 'pointer'
+                        }}
+                      />
+                      <span style={{ fontSize: '0.7rem', color: '#94a3b8', minWidth: '70px', textAlign: 'right' }}>
+                        {formatTime(currentTime)} / {formatTime(duration)}
+                      </span>
+                    </div>
 
-                    <div className="mp4-speeds">
-                      {[0.5, 1, 1.5, 2].map(speed => (
-                        <button
-                          key={speed}
-                          onClick={() => handleSpeedChange(speed)}
-                          className={`mp4-speed-btn ${playSpeed === speed ? 'active' : ''}`}
-                        >
-                          {speed}x
+                    {/* Buttons Row */}
+                    <div style={{ width: '100%', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <button onClick={togglePlayPause} className="mp4-ctrl-btn">
+                          {isPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
                         </button>
-                      ))}
+                        
+                        {/* Frame-by-Frame Controls */}
+                        <div style={{ display: 'flex', gap: '0.25rem' }}>
+                          <button
+                            onClick={handlePrevFrame}
+                            className="mp4-speed-btn"
+                            title="Retroceder 1 fotograma (30fps)"
+                            style={{ display: 'flex', alignItems: 'center', gap: '2px' }}
+                          >
+                            <span>&lt; Frame</span>
+                          </button>
+                          <button
+                            onClick={handleNextFrame}
+                            className="mp4-speed-btn"
+                            title="Avanzar 1 fotograma (30fps)"
+                            style={{ display: 'flex', alignItems: 'center', gap: '2px' }}
+                          >
+                            <span>Frame &gt;</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="mp4-speeds">
+                        {[0.5, 1, 1.5, 2].map(speed => (
+                          <button
+                            key={speed}
+                            onClick={() => handleSpeedChange(speed)}
+                            className={`mp4-speed-btn ${playSpeed === speed ? 'active' : ''}`}
+                          >
+                            {speed}x
+                          </button>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -313,7 +638,7 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
 
         {/* Capture Control Panel */}
         {loadedUrl && (
-          <div className="capture-control-bar">
+          <div className="capture-control-bar" style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
             <button
               onClick={handleCaptureFrame}
               className={`action-btn capture-btn ${videoType !== 'mp4' ? 'disabled-btn' : ''}`}
@@ -322,11 +647,28 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
               <Camera size={18} />
               <span>Capturar Fotograma</span>
             </button>
+            
+            {videoType === 'mp4' && (
+              <button
+                onClick={() => setIsRotoscopyActive(!isRotoscopyActive)}
+                className={`action-btn ${isRotoscopyActive ? 'primary-btn' : 'secondary-btn'}`}
+                style={{
+                  backgroundColor: isRotoscopyActive ? 'var(--accent-blue)' : undefined,
+                  borderColor: isRotoscopyActive ? 'var(--accent-blue)' : undefined,
+                }}
+                title="Activar/Desactivar el calco táctico de trayectorias"
+              >
+                <Tv size={18} />
+                <span>{isRotoscopyActive ? 'Desactivar Rotoscopia' : 'Activar Modo Rotoscopia'}</span>
+              </button>
+            )}
+
             {videoType !== 'mp4' && (
               <span className="text-muted text-xs font-semibold">
-                *(Captura de fotogramas solo compatible con MP4)
+                *(Controles avanzados y captura solo compatibles con MP4)
               </span>
             )}
+
             {canvasBg && (
               <button
                 onClick={() => setCanvasBg(null)}
@@ -334,6 +676,20 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
                 style={{ fontSize: '0.75rem', height: 32 }}
               >
                 <RefreshCw size={12} /> Quitar Fondo
+              </button>
+            )}
+
+            {trackingKeyframes.length > 0 && (
+              <button
+                onClick={() => {
+                  if (confirm('¿Quieres limpiar todos los puntos de tracking registrados?')) {
+                    setTrackingKeyframes([]);
+                  }
+                }}
+                className="action-btn danger-border text-red"
+                style={{ fontSize: '0.75rem', height: 32 }}
+              >
+                Limpiar Tracking ({trackingKeyframes.length})
               </button>
             )}
           </div>
@@ -379,6 +735,7 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
           backgroundImage={canvasBg || undefined}
           onClearBackground={() => setCanvasBg(null)}
           initialPlayData={initialPlayData}
+          trackingKeyframes={trackingKeyframes}
         />
       </div>
     </div>

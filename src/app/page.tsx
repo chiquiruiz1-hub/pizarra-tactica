@@ -36,6 +36,7 @@ export interface SavedPlay {
   thumbnail: string;
   videoUrl?: string;
   backgroundImage?: string;
+  trackingKeyframes?: { playerId: string; timestamp: number; x: number; y: number }[];
 }
 
 export default function PizarraProApp() {
@@ -52,6 +53,7 @@ export default function PizarraProApp() {
     equipment: EquipmentItem[];
     backgroundImage?: string;
     videoUrl?: string;
+    trackingKeyframes?: { playerId: string; timestamp: number; x: number; y: number }[];
   } | null>(null);
 
   // Active play ID for presentation mode
@@ -106,7 +108,8 @@ export default function PizarraProApp() {
           pitchType: decoded.pitchType || 'full',
           equipment: decoded.equipment || [],
           backgroundImage: decoded.backgroundImage || '',
-          videoUrl: decoded.videoUrl || ''
+          videoUrl: decoded.videoUrl || '',
+          trackingKeyframes: decoded.trackingKeyframes || []
         };
 
         setEditorInitialData(loadedPlay);
@@ -145,7 +148,8 @@ export default function PizarraProApp() {
       equipment: canvasData.equipment,
       thumbnail: canvasData.thumbnail,
       videoUrl: canvasData.videoUrl,
-      backgroundImage: canvasData.backgroundImage
+      backgroundImage: canvasData.backgroundImage,
+      trackingKeyframes: canvasData.trackingKeyframes
     };
 
     const updated = [newPlay, ...plays];
@@ -174,7 +178,8 @@ export default function PizarraProApp() {
       pitchType: play.pitchType,
       equipment: play.equipment || [],
       backgroundImage: play.backgroundImage,
-      videoUrl: play.videoUrl
+      videoUrl: play.videoUrl,
+      trackingKeyframes: play.trackingKeyframes || []
     });
 
     // Determine destination tab
