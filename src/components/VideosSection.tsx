@@ -809,6 +809,77 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
           </div>
         )}
 
+        {/* ── Keyframe Summary Panel ─────────────────────────────────── */}
+        {isRotoscopyActive && trackingKeyframes.length > 0 && (() => {
+          // Group keyframes by player
+          const byPlayer: Record<string, typeof trackingKeyframes> = {};
+          trackingKeyframes.forEach(kf => {
+            if (!byPlayer[kf.playerId]) byPlayer[kf.playerId] = [];
+            byPlayer[kf.playerId].push(kf);
+          });
+
+          const playerEntries = Object.entries(byPlayer).sort(([a], [b]) => {
+            // home first, sorted numerically, then away, then referee
+            const teamA = a.startsWith('home') ? 0 : a === 'referee' ? 2 : 1;
+            const teamB = b.startsWith('home') ? 0 : b === 'referee' ? 2 : 1;
+            if (teamA !== teamB) return teamA - teamB;
+            return parseInt(a.split('_')[1] || '0') - parseInt(b.split('_')[1] || '0');
+          });
+
+          return (
+            <div style={{
+              marginTop: '0.75rem',
+              background: 'rgba(9, 13, 22, 0.85)',
+              border: '1px solid rgba(255,255,255,0.07)',
+              borderRadius: '10px',
+              padding: '0.75rem 1rem',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.5rem'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '0.78rem', fontWeight: 700, color: '#94a3b8', letterSpacing: '0.05em', textTransform: 'uppercase' }}>
+                  📍 Keyframes de Rotoscopia — {trackingKeyframes.length} total
+                </span>
+                <span style={{ fontSize: '0.72rem', color: '#64748b' }}>
+                  {playerEntries.length} jugadores calçados
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                {playerEntries.map(([playerId, kfs]) => {
+                  const isHome = playerId.startsWith('home');
+                  const isRef  = playerId === 'referee';
+                  const col    = isRef ? '#10b981' : isHome ? '#3b82f6' : '#ef4444';
+                  const bg     = isRef ? 'rgba(16,185,129,0.12)' : isHome ? 'rgba(59,130,246,0.12)' : 'rgba(239,68,68,0.12)';
+                  const num    = isRef ? 'R' : playerId.split('_')[1];
+                  const label  = isRef ? 'Árbitro' : `${isHome ? 'Local' : 'Visit.'} ${num}`;
+                  const minT   = Math.min(...kfs.map(k => k.timestamp)).toFixed(1);
+                  const maxT   = Math.max(...kfs.map(k => k.timestamp)).toFixed(1);
+                  return (
+                    <div key={playerId} style={{
+                      display: 'flex', alignItems: 'center', gap: '0.3rem',
+                      background: bg, border: `1px solid ${col}40`,
+                      borderRadius: '6px', padding: '0.2rem 0.5rem',
+                      fontSize: '0.72rem', color: '#e2e8f0'
+                    }}>
+                      <span style={{ width: 18, height: 18, borderRadius: '50%', background: col, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 10, flexShrink: 0 }}>
+                        {num}
+                      </span>
+                      <span style={{ fontWeight: 600 }}>{label}</span>
+                      <span style={{ color: col, fontWeight: 700 }}>{kfs.length} KF</span>
+                      <span style={{ color: '#64748b' }}>[{minT}s → {maxT}s]</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <p style={{ fontSize: '0.7rem', color: '#475569', margin: 0 }}>
+                ▶ Pulsa <strong style={{ color: '#e2e8f0' }}>Play Tracking</strong> en la pizarra de la derecha para reproducir la animación LERP.
+              </p>
+            </div>
+          );
+        })()}
+
+
         {captureNotice && (
           <div className={`capture-alert-banner flex-center gap-2 ${captureNotice.startsWith('Error') ? 'error-bg' : captureNotice.startsWith('Aviso') ? 'warning-bg' : 'success-bg'}`}>
             <AlertCircle size={16} />

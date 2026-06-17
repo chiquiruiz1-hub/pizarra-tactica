@@ -906,15 +906,19 @@ export default function TacticalCanvas({
   useEffect(() => {
     const hasTracking = trackingKeyframes && trackingKeyframes.length > 0;
     if (isPlaying && hasTracking && recordingFrames.length === 0) {
-      const startTime = Date.now();
+      // Offset start so animation begins at the first keyframe timestamp, not at t=0
+      const minTime = Math.min(...(trackingKeyframes || []).map(k => k.timestamp));
+      const maxTime = Math.max(...(trackingKeyframes || []).map(k => k.timestamp));
+      const startWallTime = performance.now();
 
       const animateTracking = () => {
-        const elapsedSeconds = (Date.now() - startTime) / 1000;
-        const maxTime = Math.max(...(trackingKeyframes || []).map(k => k.timestamp), 0);
+        // Elapsed real-world seconds, scaled by playback speed
+        const elapsedSeconds = ((performance.now() - startWallTime) / 1000) * playbackSpeed + minTime;
 
         if (elapsedSeconds >= maxTime) {
           setIsPlaying(false);
-          // Set to final position
+          if (onPlayStateChange) onPlayStateChange(false);
+          // Snap to final positions
           setPlayers(prev => prev.map(p => {
             const pKfs = (trackingKeyframes || []).filter(k => k.playerId === p.id);
             if (pKfs.length > 0) {
@@ -952,7 +956,7 @@ export default function TacticalCanvas({
               };
             }
 
-            // Find keyframes to interpolate
+            // Find surrounding keyframes
             let kA = pKfs[0];
             let kB = pKfs[pKfs.length - 1];
             for (let i = 0; i < pKfs.length - 1; i++) {
@@ -963,9 +967,9 @@ export default function TacticalCanvas({
               }
             }
 
+            // LERP: Pos = A + (B - A) * t
             const timeDiff = kB.timestamp - kA.timestamp;
             const ratio = timeDiff === 0 ? 0 : (elapsedSeconds - kA.timestamp) / timeDiff;
-
             return {
               ...p,
               x: ((kA.x + (kB.x - kA.x) * ratio) / 100) * PITCH_WIDTH,
@@ -973,6 +977,9 @@ export default function TacticalCanvas({
               docked: false
             };
           }));
+
+          // Seek video in sync
+          if (onSeekVideo) onSeekVideo(elapsedSeconds);
 
           playbackAnimRef.current = requestAnimationFrame(animateTracking);
         }
@@ -986,7 +993,7 @@ export default function TacticalCanvas({
         cancelAnimationFrame(playbackAnimRef.current);
       }
     };
-  }, [isPlaying, trackingKeyframes, recordingFrames]);
+  }, [isPlaying, trackingKeyframes, recordingFrames, playbackSpeed]);
 
   // Callback to calculate interpolated player positions from JSON tracking data
   const updatePlayersPositionsAtTime = useCallback((t: number) => {
@@ -2559,9 +2566,9 @@ export default function TacticalCanvas({
               </button>
               <button onClick={handlePlayToggle} className={`play-btn ${isPlaying ? 'playing' : ''}`} disabled={isRecording || (recordingFrames.length === 0 && (!trackingKeyframes || trackingKeyframes.length === 0) && (!jsonTrackingData || !jsonTrackingData.frames || jsonTrackingData.frames.length === 0))}>
                 <Play size={16} />
-                <span>{isPlaying ? 'Parar' : 'Play'}</span>
+                <span>{isPlaying ? 'Parar' : (trackingKeyframes && trackingKeyframes.length > 0) ? 'Play Tracking' : 'Play'}</span>
               </button>
-              {jsonTrackingData && (
+              {(jsonTrackingData || (trackingKeyframes && trackingKeyframes.length > 0)) && (
                 <div className="speed-controls" style={{ display: 'inline-flex', gap: '0.25rem', marginLeft: '0.5rem', alignItems: 'center' }}>
                   <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginRight: '0.25rem' }}>Velocidad:</span>
                   {([0.25, 0.5, 1, 2] as const).map(speed => (
