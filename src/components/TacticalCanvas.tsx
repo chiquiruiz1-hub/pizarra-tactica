@@ -1300,7 +1300,7 @@ export default function TacticalCanvas({ mode, onSave, initialPlayData, backgrou
         if (pl.docked) continue;
         const dist = Math.hypot(x - pl.x, y - pl.y);
         if (dist <= PLAYER_RADIUS + 10) {
-          setPlayers(prev => prev.map(p => p.id === pl.id ? { ...p, docked: true } : p));
+          setPlayers(prev => prev.map(p => p.id === pl.id ? { ...p, x: 0, y: 0, docked: true } : p));
           setSelectedPlayerId(null);
           return;
         }
