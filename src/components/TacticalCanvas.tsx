@@ -1821,9 +1821,18 @@ export default function TacticalCanvas({
   };
 
   const handlePointerUp = (e: React.PointerEvent<any>) => {
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch (err) {
+      // ignore
+    }
     const canvas = canvasRef.current;
     if (canvas) {
-      canvas.releasePointerCapture(e.pointerId);
+      try {
+        canvas.releasePointerCapture(e.pointerId);
+      } catch (err) {
+        // ignore
+      }
     }
 
     if (isPresentationMode) {
@@ -2111,7 +2120,7 @@ export default function TacticalCanvas({
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'pizarrapro_jugada.webm';
+        a.download = 'pizarrapro_jugada.mp4';
         a.click();
         URL.revokeObjectURL(url);
         setIsExporting(false);
@@ -2906,11 +2915,13 @@ export default function TacticalCanvas({
                 position: 'relative',
                 maxWidth: '100%',
                 width: `${canvasWidth}px`,
-                aspectRatio: `${PITCH_WIDTH} / ${PITCH_HEIGHT}`
+                aspectRatio: `${PITCH_WIDTH} / ${PITCH_HEIGHT}`,
+                touchAction: 'none'
               }}
               onPointerDown={handlePointerDown}
               onPointerMove={handlePointerMove}
               onPointerUp={handlePointerUp}
+              onPointerCancel={handlePointerUp}
               onWheel={handleWheelZoom}
             >
               {/* Video Exporting Progress Overlay */}
@@ -3046,18 +3057,6 @@ export default function TacticalCanvas({
                         >
                           {isReferee ? 'ÁRB' : pl.number}
                         </div>
-
-                        {/* Hover close button */}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setPlayers(prev => prev.map(p => p.id === pl.id ? { ...p, x: 0, y: 0, docked: true } : p));
-                            setSelectedPlayerId(null);
-                          }}
-                          className="hidden group-hover:flex absolute -top-1 -right-1 w-4 h-4 bg-red-600 hover:bg-red-700 text-white rounded-full items-center justify-center text-[10px] font-bold border border-white cursor-pointer pointer-events-auto z-40"
-                        >
-                          &times;
-                        </button>
                       </div>
                     );
                   })}
