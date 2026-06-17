@@ -20,13 +20,15 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
   const [localVideoUrl, setLocalVideoUrl] = useState<string | null>(null);
 
   // Rotoscopy State
-  const [isRotoscopyActive, setIsRotoscopyActive] = useState(false);
-  const [trackingKeyframes, setTrackingKeyframes] = useState<{ playerId: string; timestamp: number; x: number; y: number }[]>([]);
-  const [showPlayerMenu, setShowPlayerMenu] = useState(false);
-  const [menuPosition, setMenuPosition] = useState<{ x: number; y: number; pageX: number; pageY: number } | null>(null);
-  const [pendingCoords, setPendingCoords] = useState<{ x: number; y: number } | null>(null);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
+  const [isRotoscopyActive, setIsRotoscopyActive]   = useState(false);
+  const [trackingKeyframes, setTrackingKeyframes]   = useState<{ playerId: string; timestamp: number; x: number; y: number }[]>([]);
+  const [currentTime, setCurrentTime]               = useState(0);
+  const [duration, setDuration]                     = useState(0);
+
+  // Active player selection (keyboard-driven flow)
+  const [activeRotoscopyPlayerId, setActiveRotoscopyPlayerId] = useState<string | null>(null);
+  const [flashKey, setFlashKey]                     = useState(0);   // incremented to trigger CSS flash
+  const [showNoPlayerTooltip, setShowNoPlayerTooltip] = useState(false);
 
   // JSON Tracking State
   const [jsonTrackingData, setJsonTrackingData] = useState<{
@@ -105,12 +107,80 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
     };
   }, [localVideoUrl]);
 
-  // Close player selection menu when video starts playing
+  // ── Global keyboard shortcuts for rotoscopy player selection ───────────
   useEffect(() => {
-    if (isPlaying) {
-      setShowPlayerMenu(false);
-    }
-  }, [isPlaying]);
+    if (!isRotoscopyActive) return;
+
+    // QWERTY row → away_1 … away_9 (alternative to Shift+number)
+    const QWERTY_AWAY: Record<string, string> = {
+      q: 'away_1', w: 'away_2', e: 'away_3', t: 'away_4',
+      y: 'away_5', u: 'away_6', i: 'away_7', o: 'away_8', p: 'away_9'
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Never steal input from text fields
+      const tag = (e.target as HTMLElement).tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+
+      // Escape → deselect
+      if (e.key === 'Escape') {
+        setActiveRotoscopyPlayerId(null);
+        return;
+      }
+
+      // Digit 1-9 (no shift) → home_1 … home_9
+      if (!e.shiftKey && e.key >= '1' && e.key <= '9') {
+        e.preventDefault();
+        setActiveRotoscopyPlayerId(`home_${e.key}`);
+        setFlashKey(k => k + 1);
+        return;
+      }
+      // Digit 0 (no shift) → home_10
+      if (!e.shiftKey && e.key === '0') {
+        e.preventDefault();
+        setActiveRotoscopyPlayerId('home_10');
+        setFlashKey(k => k + 1);
+        return;
+      }
+      // Shift+1-9 → away_1 … away_9
+      if (e.shiftKey && e.key >= '1' && e.key <= '9') {
+        e.preventDefault();
+        setActiveRotoscopyPlayerId(`away_${e.key}`);
+        setFlashKey(k => k + 1);
+        return;
+      }
+      // Shift+0 → away_10
+      if (e.shiftKey && e.key === '0') {
+        e.preventDefault();
+        setActiveRotoscopyPlayerId('away_10');
+        setFlashKey(k => k + 1);
+        return;
+      }
+      // QWERTY row letters → away players
+      const lk = e.key.toLowerCase();
+      if (!e.shiftKey && QWERTY_AWAY[lk]) {
+        e.preventDefault();
+        setActiveRotoscopyPlayerId(QWERTY_AWAY[lk]);
+        setFlashKey(k => k + 1);
+        return;
+      }
+      // 'r' alone (outside QWERTY mapping above — note 'r' is skipped intentionally)
+      if (!e.shiftKey && lk === 'r') {
+        e.preventDefault();
+        setActiveRotoscopyPlayerId('referee');
+        setFlashKey(k => k + 1);
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isRotoscopyActive]);
+
+  // Reset active player when rotoscopy is deactivated
+  useEffect(() => {
+    if (!isRotoscopyActive) setActiveRotoscopyPlayerId(null);
+  }, [isRotoscopyActive]);
 
   // Load trigger
   const handleLoadVideo = () => {
@@ -230,7 +300,7 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
     setCurrentTime(video.currentTime);
   };
 
-  // Handle click on the tracking overlay
+  // ── Overlay click: direct keyframe registration (no popup) ──────────────
   const handleOverlayClick = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!isRotoscopyActive || isPlaying) return;
 
@@ -238,36 +308,28 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
     const x = ((e.clientX - rect.left) / rect.width) * 100;
     const y = ((e.clientY - rect.top) / rect.height) * 100;
 
-    // Show context menu at relative click position
-    setMenuPosition({
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
-      pageX: e.clientX,
-      pageY: e.clientY
-    });
-    setPendingCoords({ x, y });
-    setShowPlayerMenu(true);
+    if (activeRotoscopyPlayerId) {
+      // Register keyframe immediately — no popup needed
+      const newKf = { playerId: activeRotoscopyPlayerId, timestamp: currentTime, x, y };
+      setTrackingKeyframes(prev => {
+        const filtered = prev.filter(k =>
+          !(k.playerId === activeRotoscopyPlayerId && Math.abs(k.timestamp - currentTime) < 0.1)
+        );
+        return [...filtered, newKf].sort((a, b) => a.timestamp - b.timestamp);
+      });
+      // Trigger flash feedback
+      setFlashKey(k => k + 1);
+    } else {
+      // No player selected — show tooltip hint
+      setShowNoPlayerTooltip(true);
+      setTimeout(() => setShowNoPlayerTooltip(false), 2200);
+    }
   };
 
-  // Associate clicked coordinate with a specific player ID
+  // Quick-select from panel buttons (preserves backward compat for mouse-only users)
   const handleSelectPlayer = (playerId: string) => {
-    if (!pendingCoords) return;
-
-    const newKf = {
-      playerId,
-      timestamp: currentTime,
-      x: pendingCoords.x,
-      y: pendingCoords.y
-    };
-
-    setTrackingKeyframes(prev => {
-      // Remove any keyframe for the same player at a very similar timestamp (within 0.1s) to allow re-marking
-      const filtered = prev.filter(k => !(k.playerId === playerId && Math.abs(k.timestamp - currentTime) < 0.1));
-      return [...filtered, newKf].sort((a, b) => a.timestamp - b.timestamp);
-    });
-
-    setShowPlayerMenu(false);
-    setPendingCoords(null);
+    setActiveRotoscopyPlayerId(playerId);
+    setFlashKey(k => k + 1);
   };
 
   // Import JSON tracking file handler
@@ -537,122 +599,48 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
                         );
                       })}
 
-                      {/* Floating player selection menu */}
-                      {showPlayerMenu && menuPosition && (() => {
-                        const rect = videoRef.current?.getBoundingClientRect();
-                        const width = rect?.width || 600;
-                        const height = rect?.height || 350;
-                        const leftPos = menuPosition.x > width - 220 ? menuPosition.x - 220 : menuPosition.x + 10;
-                        const topPos = menuPosition.y > height - 240 ? menuPosition.y - 240 : menuPosition.y + 10;
-                        return (
-                          <div
-                            onClick={(e) => e.stopPropagation()} // Prevent clicking through to overlay
-                            style={{
-                              position: 'absolute',
-                              left: `${leftPos}px`,
-                              top: `${topPos}px`,
-                              backgroundColor: '#0e1220',
-                              border: '1px solid rgba(255, 255, 255, 0.15)',
-                              borderRadius: '8px',
-                              padding: '0.5rem',
-                              display: 'flex',
-                              flexDirection: 'column',
-                              gap: '0.5rem',
-                              zIndex: 30,
-                              maxHeight: '220px',
-                              overflowY: 'auto',
-                              boxShadow: '0 10px 25px rgba(0,0,0,0.5)',
-                              width: '200px',
-                              pointerEvents: 'auto'
-                            }}
-                          >
-                            <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#94a3b8', borderBottom: '1px solid rgba(255,255,255,0.1)', paddingBottom: '0.25rem', textAlign: 'center' }}>
-                              Asignar ficha en t={currentTime.toFixed(2)}s
-                            </span>
-                            
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                              <span style={{ fontSize: '0.65rem', color: '#3b82f6', fontWeight: 'bold' }}>LOCAL</span>
-                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.25rem' }}>
-                                {Array.from({ length: 11 }, (_, i) => i + 1).map((n) => (
-                                  <button
-                                    key={`home_${n}`}
-                                    onClick={() => handleSelectPlayer(`home_${n}`)}
-                                    style={{
-                                      padding: '0.25rem',
-                                      fontSize: '0.75rem',
-                                      borderRadius: '4px',
-                                      backgroundColor: '#2563eb',
-                                      color: 'white',
-                                      border: 'none',
-                                      cursor: 'pointer',
-                                      fontWeight: 'bold'
-                                    }}
-                                  >
-                                    {n}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
+                      {/* ── "No player selected" tooltip ─────────────────── */}
+                      {showNoPlayerTooltip && (
+                        <div style={{
+                          position: 'absolute', top: '50%', left: '50%',
+                          transform: 'translate(-50%, -50%)',
+                          background: 'rgba(10,14,26,0.92)',
+                          border: '1px solid rgba(251,191,36,0.5)',
+                          borderRadius: 10, padding: '0.65rem 1.1rem',
+                          textAlign: 'center', pointerEvents: 'none',
+                          boxShadow: '0 8px 24px rgba(0,0,0,0.6)', zIndex: 35
+                        }}>
+                          <p style={{ fontSize: '0.8rem', fontWeight: 700, color: '#fbbf24', margin: 0 }}>⚡ Sin jugador activo</p>
+                          <p style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: 4 }}>
+                            Pulsa <strong style={{ color: '#f8fafc' }}>1–9</strong> (Local) · <strong style={{ color: '#f8fafc' }}>Shift+1–9</strong> (Visit.)<br/>
+                            o selecciona una ficha en el panel inferior.
+                          </p>
+                        </div>
+                      )}
 
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                              <span style={{ fontSize: '0.65rem', color: '#ef4444', fontWeight: 'bold' }}>VISITANTE</span>
-                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.25rem' }}>
-                                {Array.from({ length: 11 }, (_, i) => i + 1).map((n) => (
-                                  <button
-                                    key={`away_${n}`}
-                                    onClick={() => handleSelectPlayer(`away_${n}`)}
-                                    style={{
-                                      padding: '0.25rem',
-                                      fontSize: '0.75rem',
-                                      borderRadius: '4px',
-                                      backgroundColor: '#dc2626',
-                                      color: 'white',
-                                      border: 'none',
-                                      cursor: 'pointer',
-                                      fontWeight: 'bold'
-                                    }}
-                                  >
-                                    {n}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-
-                            <button
-                              onClick={() => handleSelectPlayer('referee')}
-                              style={{
-                                padding: '0.25rem',
-                                fontSize: '0.75rem',
-                                borderRadius: '4px',
-                                backgroundColor: '#10b981',
-                                color: 'white',
-                                border: 'none',
-                                cursor: 'pointer',
-                                fontWeight: 'bold',
-                                marginTop: '0.25rem'
-                              }}
-                            >
-                              Árbitro
-                            </button>
-
-                            <button
-                              onClick={() => setShowPlayerMenu(false)}
-                              style={{
-                                padding: '0.25rem',
-                                fontSize: '0.75rem',
-                                borderRadius: '4px',
-                                backgroundColor: 'rgba(255,255,255,0.05)',
-                                color: '#94a3b8',
-                                border: '1px solid rgba(255,255,255,0.1)',
-                                cursor: 'pointer',
-                                marginTop: '0.25rem'
-                              }}
-                            >
-                              Cancelar
-                            </button>
-                          </div>
-                        );
-                      })()}
+                      {/* ── Crosshair target hint on active player ────────── */}
+                      {activeRotoscopyPlayerId && (
+                        <div style={{
+                          position: 'absolute', top: 8, right: 8,
+                          background: (() => {
+                            const id = activeRotoscopyPlayerId;
+                            return id === 'referee' ? 'rgba(16,185,129,0.85)'
+                              : id.startsWith('home') ? 'rgba(37,99,235,0.85)'
+                              : 'rgba(220,38,38,0.85)';
+                          })(),
+                          borderRadius: 8, padding: '0.25rem 0.6rem',
+                          fontSize: '0.72rem', fontWeight: 700, color: '#fff',
+                          pointerEvents: 'none', zIndex: 35,
+                          boxShadow: '0 2px 8px rgba(0,0,0,0.5)',
+                          animation: `kfFlash${flashKey % 2} 0.35s ease-out`
+                        }}>
+                          🎯 {activeRotoscopyPlayerId === 'referee' ? 'Árbitro'
+                            : activeRotoscopyPlayerId.startsWith('home')
+                              ? `Local ${activeRotoscopyPlayerId.split('_')[1]}`
+                              : `Visit. ${activeRotoscopyPlayerId.split('_')[1]}`
+                          } · clic para marcar
+                        </div>
+                      )}
                     </div>
                   )}
                   
@@ -775,6 +763,98 @@ export default function VideosSection({ onSave, initialPlayData }: VideosSection
                 <Tv size={18} />
                 <span>{isRotoscopyActive ? 'Desactivar Rotoscopia' : 'Activar Modo Rotoscopia'}</span>
               </button>
+            )}
+
+            {/* ── Active Player Quick-Selector (shown when Rotoscopy is ON) ─ */}
+            {isRotoscopyActive && (
+              <div style={{
+                marginLeft: '0.25rem',
+                background: 'rgba(9,13,22,0.9)',
+                border: '1px solid rgba(255,255,255,0.1)',
+                borderRadius: 10, padding: '0.6rem 0.85rem',
+                display: 'flex', flexDirection: 'column', gap: '0.45rem',
+                minWidth: 280, flexShrink: 0
+              }}>
+                {/* Header row */}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <span style={{ fontSize: '0.72rem', fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    🎯 Ficha Activa
+                  </span>
+                  {activeRotoscopyPlayerId ? (
+                    <span
+                      key={flashKey}
+                      style={{
+                        fontSize: '0.75rem', fontWeight: 700,
+                        color: activeRotoscopyPlayerId === 'referee' ? '#10b981'
+                          : activeRotoscopyPlayerId.startsWith('home') ? '#60a5fa' : '#f87171',
+                        background: activeRotoscopyPlayerId === 'referee' ? 'rgba(16,185,129,0.15)'
+                          : activeRotoscopyPlayerId.startsWith('home') ? 'rgba(59,130,246,0.15)' : 'rgba(239,68,68,0.15)',
+                        border: `1px solid ${activeRotoscopyPlayerId === 'referee' ? 'rgba(16,185,129,0.4)' : activeRotoscopyPlayerId.startsWith('home') ? 'rgba(59,130,246,0.4)' : 'rgba(239,68,68,0.4)'}`,
+                        borderRadius: 6, padding: '0.15rem 0.5rem'
+                      }}>
+                      {activeRotoscopyPlayerId === 'referee' ? '🟢 Árbitro'
+                        : activeRotoscopyPlayerId.startsWith('home')
+                          ? `🔵 Local ${activeRotoscopyPlayerId.split('_')[1]}`
+                          : `🔴 Visit. ${activeRotoscopyPlayerId.split('_')[1]}`
+                      }
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: '0.72rem', color: '#64748b', fontStyle: 'italic' }}>Ninguna — pulsa un número</span>
+                  )}
+                  {activeRotoscopyPlayerId && (
+                    <button onClick={() => setActiveRotoscopyPlayerId(null)}
+                      style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '0.75rem', padding: '0 0.25rem' }}
+                      title="Deseleccionar (Escape)">
+                      ✕
+                    </button>
+                  )}
+                </div>
+
+                {/* Home row */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.6rem', color: '#60a5fa', fontWeight: 700, minWidth: 28 }}>LOC</span>
+                  {Array.from({ length: 11 }, (_, i) => i + 1).map(n => (
+                    <button key={`h${n}`} onClick={() => handleSelectPlayer(`home_${n}`)}
+                      title={`Local ${n} (tecla ${n <= 9 ? n : '0'})`}
+                      style={{
+                        width: 24, height: 24, borderRadius: '50%', fontSize: '0.68rem', fontWeight: 700,
+                        background: activeRotoscopyPlayerId === `home_${n}` ? '#2563eb' : 'rgba(37,99,235,0.18)',
+                        border: activeRotoscopyPlayerId === `home_${n}` ? '2px solid #60a5fa' : '1px solid rgba(59,130,246,0.3)',
+                        color: '#fff', cursor: 'pointer', transition: 'all 0.15s'
+                      }}>{n}</button>
+                  ))}
+                </div>
+
+                {/* Away row */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}>
+                  <span style={{ fontSize: '0.6rem', color: '#f87171', fontWeight: 700, minWidth: 28 }}>VIS</span>
+                  {Array.from({ length: 11 }, (_, i) => i + 1).map(n => (
+                    <button key={`a${n}`} onClick={() => handleSelectPlayer(`away_${n}`)}
+                      title={`Visitante ${n} (Shift+${n <= 9 ? n : '0'})`}
+                      style={{
+                        width: 24, height: 24, borderRadius: '50%', fontSize: '0.68rem', fontWeight: 700,
+                        background: activeRotoscopyPlayerId === `away_${n}` ? '#dc2626' : 'rgba(220,38,38,0.18)',
+                        border: activeRotoscopyPlayerId === `away_${n}` ? '2px solid #f87171' : '1px solid rgba(239,68,68,0.3)',
+                        color: '#fff', cursor: 'pointer', transition: 'all 0.15s'
+                      }}>{n}</button>
+                  ))}
+                  <button onClick={() => handleSelectPlayer('referee')}
+                    style={{
+                      padding: '0 6px', height: 24, borderRadius: 6, fontSize: '0.6rem', fontWeight: 700,
+                      background: activeRotoscopyPlayerId === 'referee' ? '#10b981' : 'rgba(16,185,129,0.18)',
+                      border: activeRotoscopyPlayerId === 'referee' ? '2px solid #34d399' : '1px solid rgba(16,185,129,0.3)',
+                      color: '#fff', cursor: 'pointer', transition: 'all 0.15s'
+                    }}>ARB</button>
+                </div>
+
+                {/* Keyboard legend */}
+                <p style={{ fontSize: '0.62rem', color: '#475569', margin: 0, lineHeight: 1.4 }}>
+                  ⌨ <strong style={{ color: '#64748b' }}>1–9</strong> Local &nbsp;·&nbsp;
+                  <strong style={{ color: '#64748b' }}>Shift+1–9</strong> Visitante &nbsp;·&nbsp;
+                  <strong style={{ color: '#64748b' }}>R</strong> Árbitro &nbsp;·&nbsp;
+                  <strong style={{ color: '#64748b' }}>Esc</strong> Deseleccionar
+                </p>
+              </div>
             )}
 
             {videoType !== 'mp4' && (
