@@ -238,6 +238,12 @@ export default function TacticalCanvas({
   const [drawings, setDrawings] = useState<Drawing[]>([]);
   const [activeDrawing, setActiveDrawing] = useState<Drawing | null>(null);
 
+  // Tactical Layers & Chronological Pins States
+  const [showStructure, setShowStructure] = useState(true);
+  const [showMovement, setShowMovement] = useState(true);
+  const [showAnnotations, setShowAnnotations] = useState(true);
+  const [pins, setPins] = useState<{ id: string; timestamp: number; label: string; players: Player[]; ball: Position; drawings: Drawing[] }[]>([]);
+
   // Recording and Playback
   const [isRecording, setIsRecording] = useState(false);
   const [recordingFrames, setRecordingFrames] = useState<Frame[]>([]);
@@ -310,6 +316,17 @@ export default function TacticalCanvas({
       activePlaybackTimeRef.current = currentPlaybackTime;
     }
   }, [currentPlaybackTime, isPlaying, isExporting]);
+
+  const getTimelineDuration = () => {
+    if (jsonTrackingData) {
+      return jsonTrackingData.duration;
+    }
+    if (recordingFrames.length > 0) {
+      return recordingFrames[recordingFrames.length - 1].timestamp / 1000;
+    }
+    return 30; // 30 seconds default
+  };
+  const timelineDuration = getTimelineDuration();
 
   // Background Image State
   const [bgImage, setBgImage] = useState<HTMLImageElement | null>(null);
@@ -481,6 +498,7 @@ export default function TacticalCanvas({
       setDrawings(initialPlayData.drawings);
       setPitchType(initialPlayData.pitchType);
       setEquipment(initialPlayData.equipment || []);
+      setPins((initialPlayData as any).pins || []);
       setInitialState({
         players: initialPlayData.players.map(p => ({ ...p })),
         ball: { ...initialPlayData.ball },
@@ -489,6 +507,7 @@ export default function TacticalCanvas({
       });
     } else {
       resetToFormations(formHome, formAway, pitchType);
+      setPins([]);
     }
   }, [initialPlayData, resetToFormations]);
 
@@ -1096,6 +1115,43 @@ export default function TacticalCanvas({
     };
   }, [isPlaying, jsonTrackingData, hasVideo, recordingFrames, playbackSpeed, updatePlayersPositionsAtTime]);
 
+  // Generic timeline playback tick loop for drawings preview
+  useEffect(() => {
+    const hasTracking = trackingKeyframes && trackingKeyframes.length > 0;
+    const hasJsonTracking = jsonTrackingData && jsonTrackingData.frames && jsonTrackingData.frames.length > 0;
+    
+    if (isPlaying && !hasJsonTracking && !hasTracking && recordingFrames.length === 0) {
+      const startPerf = performance.now();
+      const startPlayback = playbackTimeRef.current >= 30 ? 0 : playbackTimeRef.current;
+      const duration = 30; // 30 seconds
+
+      const animateGeneric = () => {
+        const elapsedReal = (performance.now() - startPerf) / 1000;
+        let t = startPlayback + elapsedReal * playbackSpeed;
+        activePlaybackTimeRef.current = t;
+
+        if (t >= duration) {
+          t = duration;
+          activePlaybackTimeRef.current = duration;
+          setCurrentPlaybackTime(duration);
+          setIsPlaying(false);
+          if (onPlayStateChange) onPlayStateChange(false);
+        } else {
+          setCurrentPlaybackTime(t);
+          playbackAnimRef.current = requestAnimationFrame(animateGeneric);
+        }
+      };
+
+      playbackAnimRef.current = requestAnimationFrame(animateGeneric);
+    }
+
+    return () => {
+      if (playbackAnimRef.current) {
+        cancelAnimationFrame(playbackAnimRef.current);
+      }
+    };
+  }, [isPlaying, jsonTrackingData, trackingKeyframes, recordingFrames, playbackSpeed, onPlayStateChange]);
+
   // Sync players positions from JSON tracking with the video currentTime
   useEffect(() => {
     if (hasVideo && videoCurrentTime !== undefined) {
@@ -1289,6 +1345,15 @@ export default function TacticalCanvas({
 
     // 2. Draw Completed Drawings
     drawings.forEach(item => {
+      // 1. Layer Visibility Check
+      const layer = (item as any).layer || (
+        item.type === 'text' || item.type === 'zone' ? 'annotations' :
+        item.type === 'arrow' ? 'movement' : 'structure'
+      );
+      if (layer === 'structure' && !showStructure) return;
+      if (layer === 'movement' && !showMovement) return;
+      if (layer === 'annotations' && !showAnnotations) return;
+
       const ANIMATION_DURATION = 1.5; // seconds
       let p = 1.0;
 
@@ -1368,6 +1433,33 @@ export default function TacticalCanvas({
           );
           ctx.closePath();
           ctx.fill();
+        }
+
+        // Concluding pulse (Ping effect) at arrow tip
+        if (item.createdAtTime !== undefined) {
+          const t = activePlaybackTimeRef.current;
+          const elapsedPing = t - (item.createdAtTime + ANIMATION_DURATION);
+          if (elapsedPing > 0 && elapsedPing <= 1.0 && (isPlaying || isExporting)) {
+            const pPing = elapsedPing / 1.0;
+            ctx.save();
+            ctx.lineWidth = 2;
+            
+            // First concentric expanding ring
+            ctx.beginPath();
+            ctx.arc(item.end.x, item.end.y, 5 + 30 * pPing, 0, 2 * Math.PI);
+            ctx.strokeStyle = hexToRgba(item.color, 1.0 - pPing);
+            ctx.stroke();
+            
+            // Second concentric ring (delayed by 0.3s)
+            if (elapsedPing > 0.3) {
+              const pPing2 = (elapsedPing - 0.3) / 0.7;
+              ctx.beginPath();
+              ctx.arc(item.end.x, item.end.y, 5 + 18 * pPing2, 0, 2 * Math.PI);
+              ctx.strokeStyle = hexToRgba(item.color, 1.0 - pPing2);
+              ctx.stroke();
+            }
+            ctx.restore();
+          }
         }
       } else if (item.type === 'circle') {
         const interpRadius = item.radius * p;
@@ -2121,15 +2213,44 @@ export default function TacticalCanvas({
   };
 
   const handleProgressBarClick = (e: React.MouseEvent<HTMLDivElement>) => {
-    if (!jsonTrackingData) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
     const width = rect.width;
     const clickRatio = Math.max(0, Math.min(1, clickX / width));
-    const seekTime = clickRatio * jsonTrackingData.duration;
+    const seekTime = clickRatio * timelineDuration;
 
     setCurrentPlaybackTime(seekTime);
-    updatePlayersPositionsAtTime(seekTime);
+    activePlaybackTimeRef.current = seekTime;
+
+    if (jsonTrackingData) {
+      updatePlayersPositionsAtTime(seekTime);
+    } else if (recordingFrames.length > 0) {
+      const seekMs = seekTime * 1000;
+      let frame = recordingFrames[0];
+      for (let i = 0; i < recordingFrames.length; i++) {
+        if (recordingFrames[i].timestamp <= seekMs) {
+          frame = recordingFrames[i];
+        } else {
+          break;
+        }
+      }
+      if (frame) {
+        setPlayers(prev =>
+          prev.map(p => {
+            const pf = frame.players.find(x => x.id === p.id);
+            if (pf) {
+              const tagColor = pf.colorTag as any;
+              return { ...p, x: pf.x, y: pf.y, colorTag: tagColor, docked: pf.docked, name: pf.name };
+            }
+            return p;
+          })
+        );
+        setBall({ ...frame.ball });
+        if (frame.equipment) {
+          setEquipment(frame.equipment.map(eq => ({ ...eq })));
+        }
+      }
+    }
 
     if (hasVideo && onSeekVideo) {
       onSeekVideo(seekTime);
@@ -2141,6 +2262,42 @@ export default function TacticalCanvas({
         setIsPlaying(true);
       }, 0);
     }
+  };
+
+  const handleAddPin = () => {
+    const label = prompt('Escribe una etiqueta/nombre para este Hito:');
+    if (!label || !label.trim()) return;
+
+    const newPin = {
+      id: `pin_${Date.now()}`,
+      timestamp: currentPlaybackTime,
+      label: label.trim(),
+      players: players.map(p => ({ ...p })),
+      ball: { ...ball },
+      drawings: drawings.map(d => ({ ...d }))
+    };
+
+    setPins(prev => {
+      const updated = [...prev, newPin].sort((a, b) => a.timestamp - b.timestamp);
+      return updated;
+    });
+  };
+
+  const handleRestorePin = (pin: typeof pins[number]) => {
+    setCurrentPlaybackTime(pin.timestamp);
+    activePlaybackTimeRef.current = pin.timestamp;
+
+    setPlayers(pin.players.map(p => ({ ...p })));
+    setBall({ ...pin.ball });
+    setDrawings(pin.drawings.map(d => ({ ...d })));
+    
+    setTimeout(() => {
+      drawAll(pin.players, pin.ball, undefined);
+    }, 0);
+  };
+
+  const handleDeletePin = (pinId: string) => {
+    setPins(prev => prev.filter(p => p.id !== pinId));
   };
 
   const handleExportVideo = () => {
@@ -2505,8 +2662,9 @@ export default function TacticalCanvas({
         thumbnail,
         backgroundImage: backgroundImage || (initialPlayData && initialPlayData.backgroundImage) || '',
         trackingKeyframes: trackingKeyframes || [],
-        jsonTrackingData: jsonTrackingData || null
-      });
+        jsonTrackingData: jsonTrackingData || null,
+        pins
+      } as any);
       setSaveName('');
       setShowSaveModal(false);
     }
@@ -2613,6 +2771,52 @@ export default function TacticalCanvas({
             )}
             
             <button onClick={() => setDrawings([])} className="tool-btn danger" title="Limpiar dibujos"><Trash2 size={16} /></button>
+
+            {/* Layer Toggles Panel */}
+            <div className="layer-toggles-panel" style={{ display: 'flex', gap: '0.25rem', borderLeft: '1px solid rgba(255,255,255,0.1)', paddingLeft: '0.5rem', marginLeft: '0.5rem' }}>
+              <button
+                onClick={() => setShowStructure(!showStructure)}
+                className={`tool-btn ${showStructure ? 'active' : ''}`}
+                style={{
+                  fontSize: '0.7rem',
+                  padding: '0.25rem 0.5rem',
+                  fontWeight: 600,
+                  opacity: showStructure ? 1 : 0.5,
+                  transition: 'opacity 0.2s'
+                }}
+                title="Capa Estructura (Líneas/Lápiz/Círculo)"
+              >
+                EST
+              </button>
+              <button
+                onClick={() => setShowMovement(!showMovement)}
+                className={`tool-btn ${showMovement ? 'active' : ''}`}
+                style={{
+                  fontSize: '0.7rem',
+                  padding: '0.25rem 0.5rem',
+                  fontWeight: 600,
+                  opacity: showMovement ? 1 : 0.5,
+                  transition: 'opacity 0.2s'
+                }}
+                title="Capa Movimiento (Flechas)"
+              >
+                MOV
+              </button>
+              <button
+                onClick={() => setShowAnnotations(!showAnnotations)}
+                className={`tool-btn ${showAnnotations ? 'active' : ''}`}
+                style={{
+                  fontSize: '0.7rem',
+                  padding: '0.25rem 0.5rem',
+                  fontWeight: 600,
+                  opacity: showAnnotations ? 1 : 0.5,
+                  transition: 'opacity 0.2s'
+                }}
+                title="Capa Anotaciones (Texto/Zonas)"
+              >
+                ANOT
+              </button>
+            </div>
           </div>
 
           {/* Action Tools */}
@@ -3138,8 +3342,8 @@ export default function TacticalCanvas({
               )}
             </div>
           </div>
-          {/* Progress Bar (Visible when jsonTrackingData is loaded) */}
-          {jsonTrackingData && (
+          {/* Progress Bar (Visible when jsonTrackingData is loaded OR in static/recorded playback modes) */}
+          {!isPresentationMode && !isRecording && (
             <div
               className="tracking-progress-bar-container glassmorphic"
               style={{
@@ -3148,38 +3352,162 @@ export default function TacticalCanvas({
                 padding: '0.75rem 1rem',
                 borderRadius: '8px',
                 display: 'flex',
-                alignItems: 'center',
-                gap: '1rem',
+                flexDirection: 'column',
+                gap: '0.5rem',
                 zIndex: 10
               }}
             >
-              <span style={{ fontSize: '0.8rem', color: '#f8fafc', fontFamily: 'monospace', minWidth: '85px', textAlign: 'center' }}>
-                {formatProgressTime(currentPlaybackTime)} / {formatProgressTime(jsonTrackingData.duration)}
-              </span>
-              <div
-                onClick={handleProgressBarClick}
-                className="progress-bar-track"
-                style={{
-                  flex: 1,
-                  height: '8px',
-                  backgroundColor: 'rgba(255, 255, 255, 0.1)',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  position: 'relative',
-                  overflow: 'hidden'
-                }}
-              >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', width: '100%' }}>
+                <span style={{ fontSize: '0.8rem', color: '#f8fafc', fontFamily: 'monospace', minWidth: '85px', textAlign: 'center' }}>
+                  {formatProgressTime(currentPlaybackTime)} / {formatProgressTime(timelineDuration)}
+                </span>
+                
                 <div
-                  className="progress-bar-fill"
                   style={{
-                    height: '100%',
-                    width: `${Math.min(100, (currentPlaybackTime / jsonTrackingData.duration) * 100)}%`,
-                    backgroundColor: 'var(--accent-color, #3b82f6)',
-                    borderRadius: '4px',
-                    transition: isPlaying ? 'none' : 'width 0.1s ease-out'
+                    flex: 1,
+                    position: 'relative',
+                    height: '24px',
+                    display: 'flex',
+                    alignItems: 'center'
                   }}
-                />
+                >
+                  <div
+                    onClick={handleProgressBarClick}
+                    className="progress-bar-track"
+                    style={{
+                      width: '100%',
+                      height: '8px',
+                      backgroundColor: 'rgba(255, 255, 255, 0.1)',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      position: 'relative'
+                    }}
+                  >
+                    <div
+                      className="progress-bar-fill"
+                      style={{
+                        height: '100%',
+                        width: `${Math.min(100, (currentPlaybackTime / timelineDuration) * 100)}%`,
+                        backgroundColor: 'var(--accent-color, #3b82f6)',
+                        borderRadius: '4px',
+                        transition: isPlaying ? 'none' : 'width 0.1s ease-out'
+                      }}
+                    />
+
+                    {/* Vertical pin indicators above the timeline track */}
+                    {pins.map(pin => {
+                      const ratio = pin.timestamp / timelineDuration;
+                      if (ratio < 0 || ratio > 1) return null;
+                      return (
+                        <div
+                          key={pin.id}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRestorePin(pin);
+                          }}
+                          style={{
+                            position: 'absolute',
+                            left: `${ratio * 100}%`,
+                            top: '-8px',
+                            width: '4px',
+                            height: '24px',
+                            backgroundColor: '#fbbf24',
+                            transform: 'translateX(-50%)',
+                            cursor: 'pointer',
+                            borderRadius: '2px',
+                            boxShadow: '0 0 4px rgba(251, 191, 36, 0.8)',
+                            zIndex: 20
+                          }}
+                          title={pin.label}
+                        />
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleAddPin}
+                  className="action-btn flex items-center gap-1"
+                  style={{
+                    backgroundColor: '#eab308',
+                    color: '#1e293b',
+                    fontWeight: 'bold',
+                    padding: '0.25rem 0.75rem',
+                    borderRadius: '6px',
+                    border: 'none',
+                    fontSize: '0.8rem',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s'
+                  }}
+                  title="Añadir Hito Táctico"
+                >
+                  📍 Hito
+                </button>
               </div>
+
+              {/* Pins Badge List below the timeline */}
+              {pins.length > 0 && (
+                <div
+                  className="pins-badges-list scrollbar-custom"
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'nowrap',
+                    overflowX: 'auto',
+                    gap: '0.5rem',
+                    padding: '0.25rem 0',
+                    width: '100%',
+                    borderTop: '1px solid rgba(255, 255, 255, 0.08)',
+                    marginTop: '0.25rem'
+                  }}
+                >
+                  {pins.map(pin => (
+                    <div
+                      key={pin.id}
+                      onClick={() => handleRestorePin(pin)}
+                      className="glassmorphic"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        padding: '0.25rem 0.5rem',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontSize: '0.75rem',
+                        color: '#f8fafc',
+                        border: '1px solid rgba(251, 191, 36, 0.3)',
+                        backgroundColor: 'rgba(251, 191, 36, 0.1)',
+                        flexShrink: 0,
+                        transition: 'all 0.2s'
+                      }}
+                    >
+                      <span style={{ fontWeight: 600, color: '#fbbf24' }}>
+                        {formatProgressTime(pin.timestamp)}
+                      </span>
+                      <span style={{ maxWidth: '120px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {pin.label}
+                      </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeletePin(pin.id);
+                        }}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: '#ef4444',
+                          cursor: 'pointer',
+                          padding: '0 0.125rem',
+                          display: 'flex',
+                          alignItems: 'center'
+                        }}
+                        title="Eliminar hito"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
