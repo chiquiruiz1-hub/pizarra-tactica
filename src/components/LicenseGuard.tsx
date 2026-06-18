@@ -21,6 +21,7 @@ export interface LicenseInfo {
 
 export default function LicenseGuard({ children }: LicenseGuardProps) {
   const [loading, setLoading] = useState(true);
+  const [isFreePeriod, setIsFreePeriod] = useState(true); // Default to true until checked
   const [licenseKey, setLicenseKey] = useState<string | null>(null);
   const [isValid, setIsValid] = useState(false);
   const [licenseData, setLicenseData] = useState<LicenseInfo | null>(null);
@@ -68,6 +69,20 @@ export default function LicenseGuard({ children }: LicenseGuardProps) {
 
   useEffect(() => {
     const checkSavedLicense = async () => {
+      // 1. Check if we are still in the free trial period (until Dec 31, 2026 inclusive, i.e., before Jan 1, 2027)
+      const freePeriodEnd = new Date('2027-01-01T00:00:00');
+      const now = new Date();
+
+      if (now < freePeriodEnd) {
+        setIsFreePeriod(true);
+        setLoading(false);
+        return;
+      }
+
+      // Past the free trial period
+      setIsFreePeriod(false);
+
+      // 2. Normal license verification flow
       const savedKey = localStorage.getItem('pizarrapro_license_key');
       if (!savedKey) {
         setLoading(false);
@@ -137,6 +152,11 @@ export default function LicenseGuard({ children }: LicenseGuardProps) {
         </div>
       </div>
     );
+  }
+
+  // If current date is within the free trial period, let everyone access PizarraPro
+  if (isFreePeriod) {
+    return <>{children}</>;
   }
 
   // Case 1: No license key has been entered yet (Activation screen)
