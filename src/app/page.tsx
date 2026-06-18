@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import DashboardHome from '../components/DashboardHome';
+import LicenseGuard from '../components/LicenseGuard';
 import TacticalCanvas, { Player, Position, Drawing, EquipmentItem } from '../components/TacticalCanvas';
 import LibraryView from '../components/LibraryView';
 import PresentationView from '../components/PresentationView';
@@ -225,7 +226,8 @@ export default function PizarraProApp() {
   ];
 
   return (
-    <div className="app-container">
+    <LicenseGuard>
+      <div className="app-container">
       {/* SIDEBAR NAVIGATION */}
       <aside className={`sidebar glassmorphic ${sidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-brand">
@@ -367,6 +369,7 @@ export default function PizarraProApp() {
       {vestuarioOpen && (
         <VestuarioMode onClose={() => setVestuarioOpen(false)} />
       )}
-    </div>
+      </div>
+    </LicenseGuard>
   );
 }
