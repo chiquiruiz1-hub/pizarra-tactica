@@ -229,6 +229,9 @@ export default function PizarraProApp() {
     <LicenseGuard>
       <div className="app-container">
       {/* SIDEBAR NAVIGATION */}
+      {sidebarOpen && (
+        <div className="sidebar-overlay" onClick={() => setSidebarOpen(false)} />
+      )}
       <aside className={`sidebar glassmorphic ${sidebarOpen ? 'open' : ''}`}>
         <div className="sidebar-brand">
           <Zap size={22} className="text-green" />

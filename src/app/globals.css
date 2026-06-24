@@ -1026,10 +1026,25 @@ body {
     top: 56px;
     left: -260px;
     height: calc(100vh - 56px);
+    background-color: var(--bg-secondary);
+    z-index: 1000;
+    box-shadow: 10px 0 30px rgba(0, 0, 0, 0.5);
   }
 
   .sidebar.open {
     left: 0;
+  }
+
+  .sidebar-overlay {
+    position: fixed;
+    top: 56px;
+    left: 0;
+    width: 100vw;
+    height: calc(100vh - 56px);
+    background: rgba(4, 5, 8, 0.6);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    z-index: 999;
   }
 
   .mobile-header {
