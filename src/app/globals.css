@@ -1017,6 +1017,10 @@ body {
 
 /* Mobile responsive styles */
 @media (max-width: 1024px) {
+  .app-container {
+    flex-direction: column;
+  }
+
   .sidebar {
     position: fixed;
     top: 56px;
